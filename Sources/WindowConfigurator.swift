@@ -5,7 +5,7 @@ struct WindowConfigurator: NSViewRepresentable {
     @Binding var isCollapsed: Bool
 
     func makeNSView(context: Context) -> NSView {
-        let view = NSView()
+        let view = PassthroughView()
 
         DispatchQueue.main.async {
             guard let window = view.window else { return }
@@ -13,6 +13,12 @@ struct WindowConfigurator: NSViewRepresentable {
         }
 
         return view
+    }
+
+    private final class PassthroughView: NSView {
+        override func hitTest(_ point: NSPoint) -> NSView? {
+            nil
+        }
     }
 
     func updateNSView(_ nsView: NSView, context: Context) {
@@ -32,12 +38,12 @@ struct WindowConfigurator: NSViewRepresentable {
         coordinator.installDoubleClickMonitor(for: window)
 
         window.level = .floating
-        window.isMovableByWindowBackground = true
+        window.isMovableByWindowBackground = isCollapsed
         window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
-        window.isOpaque = false
-        window.backgroundColor = .clear
+        window.isOpaque = !isCollapsed
+        window.backgroundColor = isCollapsed ? .clear : .windowBackgroundColor
         window.hasShadow = !isCollapsed
 
         window.standardWindowButton(.zoomButton)?.isHidden = true

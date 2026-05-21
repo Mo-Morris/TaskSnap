@@ -10,6 +10,9 @@ struct TaskBoardView: View {
     @State private var isDropTargeted = false
     @State private var previewTask: TaskItem?
     @State private var inputAlert: InputAlert?
+    @State private var draggingTaskID: TaskItem.ID?
+    @State private var dragVerticalOffset: CGFloat = 0
+    @State private var reorderTargetIndex: Int?
     @FocusState private var isPasteTargetFocused: Bool
 
     var body: some View {
@@ -34,6 +37,7 @@ struct TaskBoardView: View {
                         isDropTargeted ? Color.accentColor : Color.white.opacity(0.18),
                         lineWidth: isDropTargeted ? 2 : 1
                     )
+                    .allowsHitTesting(false)
             }
         }
         .clipShape(RoundedRectangle(cornerRadius: isCollapsed ? 36 : 14, style: .continuous))
@@ -55,9 +59,6 @@ struct TaskBoardView: View {
         .onAppear {
             isPasteTargetFocused = true
         }
-        .simultaneousGesture(TapGesture().onEnded {
-            isPasteTargetFocused = true
-        })
         .onChange(of: pasteCommandDispatcher.requestID) {
             pasteImageFromPasteboard()
         }
@@ -95,7 +96,7 @@ struct TaskBoardView: View {
                 taskList
             }
         }
-        .background(.regularMaterial)
+        .background(Color(nsColor: .windowBackgroundColor))
     }
 
     private var emptyState: some View {
@@ -125,27 +126,69 @@ struct TaskBoardView: View {
     private var taskList: some View {
         ScrollView {
             LazyVStack(spacing: 10) {
-                ForEach(store.tasks) { task in
-                    TaskRow(task: task) {
+                ForEach(Array(store.tasks.enumerated()), id: \.element.id) { index, task in
+                    if reorderTargetIndex == index, draggingTaskID != nil {
+                        ReorderInsertionIndicator()
+                    }
+
+                    TaskRow(
+                        task: task,
+                        isSummarizing: store.summarizingTaskIDs.contains(task.id)
+                    ) {
                         store.toggle(task)
                     } onDelete: {
                         store.delete(task)
                     } onPreview: {
                         previewTask = task
+                    } onReorderChanged: { verticalOffset in
+                        updateReorderTarget(for: task, sourceIndex: index, verticalOffset: verticalOffset)
+                    } onReorderEnded: {
+                        finishReorder(for: task)
                     }
+                    .offset(y: draggingTaskID == task.id ? dragVerticalOffset : 0)
+                    .scaleEffect(draggingTaskID == task.id ? 1.012 : 1)
+                    .zIndex(draggingTaskID == task.id ? 10 : 0)
                     .overlay(alignment: .topTrailing) {
                         if store.summarizingTaskIDs.contains(task.id) {
                             ProgressView()
                                 .controlSize(.small)
                                 .padding(8)
+                                .allowsHitTesting(false)
                         }
                     }
+                }
+
+                if reorderTargetIndex == store.tasks.count, draggingTaskID != nil {
+                    ReorderInsertionIndicator()
                 }
             }
             .padding(12)
             .frame(maxWidth: .infinity)
         }
         .frame(maxWidth: .infinity)
+    }
+
+    private func updateReorderTarget(for task: TaskItem, sourceIndex: Int, verticalOffset: CGFloat) {
+        draggingTaskID = task.id
+        dragVerticalOffset = verticalOffset
+
+        let rowStep: CGFloat = 124
+        let rawIndex = CGFloat(sourceIndex) + (verticalOffset / rowStep).rounded()
+        reorderTargetIndex = min(max(Int(rawIndex), 0), store.tasks.count)
+    }
+
+    private func finishReorder(for task: TaskItem) {
+        if let reorderTargetIndex {
+            withAnimation(.spring(response: 0.28, dampingFraction: 0.84)) {
+                store.move(task, to: reorderTargetIndex)
+            }
+        }
+
+        withAnimation(.spring(response: 0.26, dampingFraction: 0.86)) {
+            draggingTaskID = nil
+            dragVerticalOffset = 0
+            reorderTargetIndex = nil
+        }
     }
 
     private func handleDrop(providers: [NSItemProvider]) -> Bool {
@@ -378,16 +421,31 @@ private enum InputAlert {
 
 private struct TaskRow: View {
     let task: TaskItem
+    let isSummarizing: Bool
     let onToggle: () -> Void
     let onDelete: () -> Void
     let onPreview: () -> Void
+    let onReorderChanged: (CGFloat) -> Void
+    let onReorderEnded: () -> Void
+
+    @State private var horizontalOffset: CGFloat = 0
+    @State private var dragMode: TaskDragMode?
+    @State private var isHovering = false
 
     private var cardColor: Color {
         Color(hex: task.backgroundColorHex)
     }
 
+    private var isDraggingHorizontally: Bool {
+        dragMode == .horizontal && abs(horizontalOffset) > 4
+    }
+
     private var displayTitle: String {
-        splitTitleAndDescription.title
+        if isSummarizing {
+            return "AI 生成中..."
+        }
+
+        return splitTitleAndDescription.title
     }
 
     private var displayDescription: String {
@@ -396,20 +454,27 @@ private struct TaskRow: View {
 
     private var splitTitleAndDescription: (title: String, description: String) {
         let normalized = task.title
-            .replacingOccurrences(of: "\n", with: " ")
-            .replacingOccurrences(of: "  ", with: " ")
             .trimmingCharacters(in: .whitespacesAndNewlines)
 
         guard !normalized.isEmpty else {
             return ("未命名截图任务", "等待视觉模型补全截图里的任务线索。")
         }
 
+        if let structured = structuredTitleAndDescription(from: normalized) {
+            return structured
+        }
+
+        let compact = normalized
+            .replacingOccurrences(of: "\n", with: " ")
+            .replacingOccurrences(of: "  ", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
         let separators = CharacterSet(charactersIn: "。！？!?；;，,")
-        if let separatorRange = normalized.rangeOfCharacter(from: separators) {
-            let title = String(normalized[..<separatorRange.lowerBound])
+        if let separatorRange = compact.rangeOfCharacter(from: separators) {
+            let title = String(compact[..<separatorRange.lowerBound])
                 .trimmingCharacters(in: .whitespacesAndNewlines)
-            let descriptionStart = normalized.index(after: separatorRange.lowerBound)
-            let description = String(normalized[descriptionStart...])
+            let descriptionStart = compact.index(after: separatorRange.lowerBound)
+            let description = String(compact[descriptionStart...])
                 .trimmingCharacters(in: .whitespacesAndNewlines)
 
             if !title.isEmpty, !description.isEmpty {
@@ -417,120 +482,292 @@ private struct TaskRow: View {
             }
         }
 
-        if normalized.count > 18 {
-            let splitIndex = normalized.index(normalized.startIndex, offsetBy: 18)
-            let title = String(normalized[..<splitIndex])
-            let description = String(normalized[splitIndex...])
+        if compact.count > 18 {
+            let splitIndex = compact.index(compact.startIndex, offsetBy: 18)
+            let title = String(compact[..<splitIndex])
+            let description = String(compact[splitIndex...])
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             return (title, description.isEmpty ? "查看截图，快速回到这项任务的上下文。" : description)
         }
 
-        return (normalized, "查看截图，快速回到这项任务的上下文。")
+        return (compact, "查看截图，快速回到这项任务的上下文。")
+    }
+
+    private func structuredTitleAndDescription(from text: String) -> (title: String, description: String)? {
+        let lines = text
+            .components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        var title: String?
+        var description: String?
+
+        for line in lines {
+            if let value = value(afterAnyPrefix: ["主标题：", "主标题:", "标题：", "标题:"], in: line) {
+                title = value
+            } else if let value = value(afterAnyPrefix: ["副标题：", "副标题:", "背景：", "背景:"], in: line) {
+                description = value
+            }
+        }
+
+        guard let title, !title.isEmpty else {
+            return nil
+        }
+
+        return (title, description?.isEmpty == false ? description! : "查看截图，快速回到这项任务的上下文。")
+    }
+
+    private func value(afterAnyPrefix prefixes: [String], in line: String) -> String? {
+        for prefix in prefixes where line.hasPrefix(prefix) {
+            return String(line.dropFirst(prefix.count))
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        return nil
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .top, spacing: 10) {
-                Button(action: onToggle) {
-                    Image(systemName: task.isDone ? "checkmark.circle.fill" : "circle")
-                        .font(.system(size: 22, weight: .semibold))
-                        .foregroundStyle(task.isDone ? Color.green : Color.secondary)
-                        .frame(width: 28, height: 28)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .help(task.isDone ? "标记为未完成" : "划掉任务")
+        ZStack {
+            swipeActions
 
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(displayTitle)
-                        .font(.system(size: 20, weight: .bold, design: .rounded))
-                        .foregroundStyle(task.isDone ? .secondary : .primary)
-                        .strikethrough(task.isDone)
-                        .lineLimit(2)
-                        .fixedSize(horizontal: false, vertical: true)
-
-                    Text(displayDescription)
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
-                Spacer(minLength: 8)
-
-                VStack(alignment: .trailing, spacing: 8) {
-                    Text(task.isDone ? "已完成" : "进行中")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(task.isDone ? Color.green : Color.accentColor)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(.thinMaterial)
-                        .clipShape(Capsule())
-
-                    TaskRowIconButton(
-                        systemName: "trash",
-                        foregroundStyle: .secondary,
-                        help: "删除任务",
-                        action: onDelete
-                    )
-                }
+            cardContent
+                .offset(x: horizontalOffset)
+                .shadow(
+                    color: Color.black.opacity(dragMode == nil ? (task.isDone ? 0.025 : 0.07) : 0.14),
+                    radius: dragMode == nil ? 8 : 16,
+                    y: dragMode == nil ? 3 : 8
+                )
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .gesture(rowDragGesture)
+        .onHover { isHovering = $0 }
+        .contextMenu {
+            Button(action: onToggle) {
+                Label(task.isDone ? "标记为未完成" : "完成任务", systemImage: "checkmark.circle")
             }
 
-            if let image = NSImage(data: task.imageData) {
-                Button(action: onPreview) {
-                    ZStack(alignment: .bottomLeading) {
-                        Image(nsImage: image)
-                            .resizable()
-                            .scaledToFill()
-                            .frame(height: 156)
-                            .frame(maxWidth: .infinity)
-                            .clipped()
-                            .opacity(task.isDone ? 0.5 : 1)
-
-                        LinearGradient(
-                            colors: [
-                                Color.black.opacity(0.34),
-                                Color.black.opacity(0)
-                            ],
-                            startPoint: .bottom,
-                            endPoint: .center
-                        )
-
-                        Label("查看截图", systemImage: "arrow.up.left.and.arrow.down.right")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 9)
-                            .padding(.vertical, 6)
-                            .background(Color.black.opacity(0.28))
-                            .clipShape(Capsule())
-                            .padding(10)
-                    }
-                    .frame(height: 156)
-                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .stroke(Color.white.opacity(0.55), lineWidth: 1)
-                    }
-                }
-                .buttonStyle(.plain)
-                .help("点击放大截图")
+            Button(role: .destructive, action: onDelete) {
+                Label("删除任务", systemImage: "trash")
             }
         }
-        .padding(12)
+    }
+
+    private var cardContent: some View {
+        HStack(alignment: .center, spacing: 12) {
+            thumbnail
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text(displayTitle)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(task.isDone ? .secondary : .primary)
+                    .strikethrough(task.isDone)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.84)
+                    .multilineTextAlignment(.leading)
+
+                Text(displayDescription)
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.82)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            DragGrip()
+                .opacity(dragMode == .vertical || isHovering ? 0.62 : 0)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
         .background {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(cardColor.opacity(task.isDone ? 0.42 : 0.9))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(.regularMaterial.opacity(task.isDone ? 0.35 : 0.12))
-                }
+                .fill(cardColor.opacity(task.isDone ? 0.2 : 0.48))
         }
         .overlay {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(Color.white.opacity(0.7), lineWidth: 1)
+                .stroke(Color.black.opacity(0.1), lineWidth: 1)
+                .allowsHitTesting(false)
         }
-        .shadow(color: Color.black.opacity(task.isDone ? 0.04 : 0.1), radius: 12, y: 6)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .opacity(task.isDone ? 0.68 : 1)
+    }
+
+    private var swipeActions: some View {
+        HStack(spacing: 8) {
+            ActionRevealView(
+                systemName: "checkmark",
+                tint: Color(red: 0.47, green: 0.74, blue: 0.55),
+                alignment: .leading
+            )
+            .opacity(isDraggingHorizontally ? 1 : 0)
+
+            Spacer(minLength: 12)
+
+            ActionRevealView(
+                systemName: "trash",
+                tint: Color(red: 0.9, green: 0.46, blue: 0.42),
+                alignment: .trailing
+            )
+            .opacity(isDraggingHorizontally ? 1 : 0)
+        }
+        .animation(.easeOut(duration: 0.14), value: isDraggingHorizontally)
+    }
+
+    private var rowDragGesture: some Gesture {
+        DragGesture(minimumDistance: 7)
+            .onChanged { value in
+                if dragMode == nil {
+                    let isHorizontal = abs(value.translation.width) > abs(value.translation.height)
+                    dragMode = isHorizontal ? .horizontal : .vertical
+                }
+
+                switch dragMode {
+                case .horizontal:
+                    horizontalOffset = min(max(value.translation.width, -92), 92)
+                case .vertical:
+                    horizontalOffset = 0
+                    onReorderChanged(value.translation.height)
+                case nil:
+                    break
+                }
+            }
+            .onEnded { _ in
+                switch dragMode {
+                case .horizontal:
+                    completeHorizontalDrag()
+                case .vertical:
+                    onReorderEnded()
+                case nil:
+                    break
+                }
+
+                dragMode = nil
+            }
+    }
+
+    private func completeHorizontalDrag() {
+        let offset = horizontalOffset
+
+        withAnimation(.spring(response: 0.24, dampingFraction: 0.82)) {
+            horizontalOffset = 0
+        }
+
+        if offset > 72 {
+            onToggle()
+        } else if offset < -72 {
+            onDelete()
+        }
+    }
+
+    @ViewBuilder
+    private var thumbnail: some View {
+        if let image = NSImage(data: task.imageData) {
+            Button(action: onPreview) {
+                ZStack(alignment: .bottomTrailing) {
+                    Image(nsImage: image)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: 94, height: 92)
+                        .clipped()
+                        .opacity(task.isDone ? 0.5 : 1)
+
+                    Image(systemName: "arrow.up.left.and.arrow.down.right")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 24, height: 24)
+                        .background(Color.black.opacity(0.42))
+                        .clipShape(Circle())
+                        .padding(6)
+                }
+                .frame(width: 94, height: 92)
+                .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 5, style: .continuous)
+                        .stroke(Color.black.opacity(0.12), lineWidth: 1)
+                }
+                .contentShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .pointingHandCursor()
+            .help("点击查看大图")
+            .accessibilityLabel("查看截图大图")
+        } else {
+            RoundedRectangle(cornerRadius: 5, style: .continuous)
+                .fill(Color.white.opacity(0.72))
+                .frame(width: 94, height: 92)
+                .overlay {
+                    Text("图片缩略图")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .overlay {
+                    RoundedRectangle(cornerRadius: 5, style: .continuous)
+                        .stroke(Color.black.opacity(0.12), lineWidth: 1)
+                }
+        }
+    }
+}
+
+private enum TaskDragMode {
+    case horizontal
+    case vertical
+}
+
+private struct ActionRevealView: View {
+    let systemName: String
+    let tint: Color
+    let alignment: Alignment
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: 8, style: .continuous)
+            .fill(tint.opacity(0.2))
+            .frame(width: 78)
+            .overlay(alignment: alignment) {
+                Image(systemName: systemName)
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundStyle(tint)
+                    .frame(width: 34, height: 34)
+                    .background(Color.white.opacity(0.74))
+                    .clipShape(Circle())
+                    .padding(.horizontal, 16)
+            }
+    }
+}
+
+private struct DragGrip: View {
+    var body: some View {
+        VStack(spacing: 3) {
+            ForEach(0..<3, id: \.self) { _ in
+                HStack(spacing: 3) {
+                    Circle()
+                        .frame(width: 3, height: 3)
+                    Circle()
+                        .frame(width: 3, height: 3)
+                }
+            }
+        }
+        .foregroundStyle(Color.secondary)
+        .frame(width: 18, height: 38)
+    }
+}
+
+private struct ReorderInsertionIndicator: View {
+    var body: some View {
+        HStack(spacing: 0) {
+            Circle()
+                .fill(Color.accentColor.opacity(0.7))
+                .frame(width: 6, height: 6)
+
+            Rectangle()
+                .fill(Color.accentColor.opacity(0.58))
+                .frame(height: 2)
+
+            Circle()
+                .fill(Color.accentColor.opacity(0.7))
+                .frame(width: 6, height: 6)
+        }
+        .padding(.horizontal, 14)
+        .frame(height: 8)
+        .transition(.opacity.combined(with: .scale(scale: 0.96)))
     }
 }
 
@@ -545,11 +782,43 @@ private struct TaskRowIconButton: View {
             Image(systemName: systemName)
                 .font(.title3)
                 .foregroundStyle(foregroundStyle)
-                .frame(width: 26, height: 26)
+                .frame(width: 32, height: 32)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .pointingHandCursor()
         .help(help)
+        .accessibilityLabel(help)
+    }
+}
+
+private struct PointingHandCursorModifier: ViewModifier {
+    @State private var isHovering = false
+
+    func body(content: Content) -> some View {
+        content
+            .onHover { hovering in
+                guard hovering != isHovering else { return }
+
+                isHovering = hovering
+                if hovering {
+                    NSCursor.pointingHand.push()
+                } else {
+                    NSCursor.pop()
+                }
+            }
+            .onDisappear {
+                if isHovering {
+                    NSCursor.pop()
+                    isHovering = false
+                }
+            }
+    }
+}
+
+private extension View {
+    func pointingHandCursor() -> some View {
+        modifier(PointingHandCursorModifier())
     }
 }
 

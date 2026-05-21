@@ -23,7 +23,10 @@ struct TaskSnapApp: App {
                 idealHeight: isTaskBoardCollapsed ? 72 : 420,
                 maxHeight: isTaskBoardCollapsed ? 72 : .infinity
             )
-            .background(WindowConfigurator(isCollapsed: $isTaskBoardCollapsed))
+            .background {
+                WindowConfigurator(isCollapsed: $isTaskBoardCollapsed)
+                    .allowsHitTesting(false)
+            }
             .onAppear {
                 appDelegate.pasteCommandDispatcher = pasteCommandDispatcher
             }
@@ -57,6 +60,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var pasteEventMonitor: Any?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        NSApp.applicationIconImage = AppIcon.makeImage()
         NSApp.setActivationPolicy(.regular)
         pasteEventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard

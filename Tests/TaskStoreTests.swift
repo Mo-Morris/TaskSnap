@@ -87,6 +87,32 @@ import Testing
     #expect(store.tasks.first?.title == "检查结算页异常")
 }
 
+@MainActor
+@Test func taskStoreMovesImageTasks() async throws {
+    let urls = temporaryStoreURLs()
+    let store = TaskStore(
+        storeURL: urls.tasks,
+        configurationURL: urls.configuration,
+        visionSummarizer: FakeVisionSummarizer(summaries: ["第三个任务", "第二个任务", "第一个任务"])
+    )
+
+    try await store.saveVisionConfiguration(VisionModelConfiguration(
+        endpoint: "https://example.com",
+        apiKey: "key",
+        model: "vision-model"
+    ))
+
+    _ = store.addImageData(testPNG, title: "第三个任务")
+    _ = store.addImageData(testPNG, title: "第二个任务")
+    _ = store.addImageData(testPNG, title: "第一个任务")
+    try await Task.sleep(for: .milliseconds(50))
+
+    let firstTask = store.tasks[0]
+    store.move(firstTask, to: 3)
+
+    #expect(store.tasks.map(\.title) == ["第二个任务", "第三个任务", "第一个任务"])
+}
+
 private func temporaryStoreURLs() -> (tasks: URL, configuration: URL) {
     let directory = FileManager.default.temporaryDirectory
         .appending(path: "TaskSnapTests")
@@ -102,17 +128,37 @@ private let testPNG = Data(base64Encoded: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAA
 
 private final class FakeVisionSummarizer: VisionSummarizing, @unchecked Sendable {
     var didValidate = false
-    private let summary: String
+    private let summaries: SummaryQueue
 
     init(summary: String) {
-        self.summary = summary
+        summaries = SummaryQueue([summary])
+    }
+
+    init(summaries: [String]) {
+        self.summaries = SummaryQueue(summaries)
     }
 
     func summarize(imageData: Data, configuration: VisionModelConfiguration) async throws -> String {
-        summary
+        await summaries.next()
     }
 
     func validate(configuration: VisionModelConfiguration) async throws {
         didValidate = true
+    }
+}
+
+private actor SummaryQueue {
+    private var values: [String]
+
+    init(_ values: [String]) {
+        self.values = values
+    }
+
+    func next() -> String {
+        if values.count > 1 {
+            return values.removeFirst()
+        }
+
+        return values.first ?? ""
     }
 }

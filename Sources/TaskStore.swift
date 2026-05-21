@@ -106,6 +106,17 @@ final class TaskStore: ObservableObject {
         tasks.removeAll { $0.id == task.id }
     }
 
+    func move(_ task: TaskItem, to targetIndex: Int) {
+        guard let sourceIndex = tasks.firstIndex(where: { $0.id == task.id }) else {
+            return
+        }
+
+        let task = tasks.remove(at: sourceIndex)
+        let adjustedIndex = targetIndex > sourceIndex ? targetIndex - 1 : targetIndex
+        let insertionIndex = min(max(adjustedIndex, 0), tasks.count)
+        tasks.insert(task, at: insertionIndex)
+    }
+
     func clearCompleted() {
         tasks.removeAll { $0.isDone }
     }
