@@ -6,15 +6,27 @@ struct TaskSnapApp: App {
     @Environment(\.openSettings) private var openSettings
     @StateObject private var store = TaskStore()
     @StateObject private var pasteCommandDispatcher = PasteCommandDispatcher()
+    @State private var isTaskBoardCollapsed = false
 
     var body: some Scene {
         WindowGroup("TaskSnap") {
-            TaskBoardView(store: store, pasteCommandDispatcher: pasteCommandDispatcher)
-                .frame(minWidth: 320, idealWidth: 520, minHeight: 420)
-                .background(WindowConfigurator())
-                .onAppear {
-                    appDelegate.pasteCommandDispatcher = pasteCommandDispatcher
-                }
+            TaskBoardView(
+                store: store,
+                pasteCommandDispatcher: pasteCommandDispatcher,
+                isCollapsed: $isTaskBoardCollapsed
+            )
+            .frame(
+                minWidth: isTaskBoardCollapsed ? 56 : 320,
+                idealWidth: isTaskBoardCollapsed ? 56 : 520,
+                maxWidth: isTaskBoardCollapsed ? 56 : .infinity,
+                minHeight: isTaskBoardCollapsed ? 56 : 420,
+                idealHeight: isTaskBoardCollapsed ? 56 : 420,
+                maxHeight: isTaskBoardCollapsed ? 56 : .infinity
+            )
+            .background(WindowConfigurator(isCollapsed: isTaskBoardCollapsed))
+            .onAppear {
+                appDelegate.pasteCommandDispatcher = pasteCommandDispatcher
+            }
         }
         .windowStyle(.hiddenTitleBar)
         .commands {

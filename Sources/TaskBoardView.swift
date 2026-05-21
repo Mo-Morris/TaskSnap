@@ -5,6 +5,7 @@ import UniformTypeIdentifiers
 struct TaskBoardView: View {
     @ObservedObject var store: TaskStore
     @ObservedObject var pasteCommandDispatcher: PasteCommandDispatcher
+    @Binding var isCollapsed: Bool
     @Environment(\.openSettings) private var openSettings
     @State private var isDropTargeted = false
     @State private var previewTask: TaskItem?
@@ -12,21 +13,30 @@ struct TaskBoardView: View {
     @FocusState private var isPasteTargetFocused: Bool
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
-
-            if store.tasks.isEmpty {
-                emptyState
+        Group {
+            if isCollapsed {
+                CollapsedTaskIconView(
+                    activeTaskCount: activeTaskCount,
+                    isWorking: !store.summarizingTaskIDs.isEmpty
+                ) {
+                    withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
+                        isCollapsed = false
+                    }
+                }
             } else {
-                taskList
+                expandedBoard
             }
         }
-        .background(.regularMaterial)
         .overlay {
-            RoundedRectangle(cornerRadius: 14)
-                .stroke(isDropTargeted ? Color.accentColor : Color.white.opacity(0.18), lineWidth: isDropTargeted ? 2 : 1)
+            if !isCollapsed || isDropTargeted {
+                RoundedRectangle(cornerRadius: isCollapsed ? 28 : 14)
+                    .stroke(
+                        isDropTargeted ? Color.accentColor : Color.white.opacity(0.18),
+                        lineWidth: isDropTargeted ? 2 : 1
+                    )
+            }
         }
-        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .clipShape(RoundedRectangle(cornerRadius: isCollapsed ? 28 : 14, style: .continuous))
         .onDrop(
             of: [UTType.image.identifier, UTType.fileURL.identifier, UTType.png.identifier, UTType.jpeg.identifier],
             isTargeted: $isDropTargeted,
@@ -72,12 +82,29 @@ struct TaskBoardView: View {
         }
     }
 
+    private var activeTaskCount: Int {
+        store.tasks.filter { !$0.isDone }.count
+    }
+
+    private var expandedBoard: some View {
+        VStack(spacing: 0) {
+            header
+
+            if store.tasks.isEmpty {
+                emptyState
+            } else {
+                taskList
+            }
+        }
+        .background(.regularMaterial)
+    }
+
     private var header: some View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
                 Text("多任务并行备忘录")
                     .font(.headline)
-                Text("\(store.tasks.filter { !$0.isDone }.count) 个任务进行中")
+                Text("\(activeTaskCount) 个任务进行中")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -85,12 +112,18 @@ struct TaskBoardView: View {
             Spacer()
 
             Button {
-                store.clearCompleted()
+                withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
+                    isCollapsed = true
+                }
             } label: {
-                Image(systemName: "checkmark.circle")
+                Image(systemName: "chevron.down.circle")
+                    .font(.title3)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 28, height: 28)
+                    .contentShape(Rectangle())
             }
-            .help("清空已完成任务")
-            .buttonStyle(.borderless)
+            .buttonStyle(.plain)
+            .help("收缩为悬浮图标")
         }
         .padding(16)
         .background(Color.black.opacity(0.08))
@@ -147,6 +180,10 @@ struct TaskBoardView: View {
     }
 
     private func handleDrop(providers: [NSItemProvider]) -> Bool {
+        if isCollapsed {
+            isCollapsed = false
+        }
+
         guard store.visionConfiguration != nil else {
             inputAlert = .missingVisionConfiguration
             return false
@@ -190,13 +227,94 @@ struct TaskBoardView: View {
 
     private func pasteImageFromPasteboard() {
         guard store.visionConfiguration != nil else {
+            isCollapsed = false
             inputAlert = .missingVisionConfiguration
             return
         }
 
         if !store.addImageFromPasteboard() {
+            isCollapsed = false
             inputAlert = .addFailed("剪贴板里没有可识别的图片。")
+        } else if isCollapsed {
+            isCollapsed = false
         }
+    }
+}
+
+private struct CollapsedTaskIconView: View {
+    let activeTaskCount: Int
+    let isWorking: Bool
+    let onExpand: () -> Void
+
+    @State private var isAnimating = false
+
+    var body: some View {
+        Button(action: onExpand) {
+            ZStack {
+                Circle()
+                    .fill(iconGradient)
+                    .shadow(color: Color(red: 0.54, green: 0.36, blue: 0.96).opacity(0.2), radius: 14, y: 5)
+                    .shadow(color: Color.white.opacity(0.9), radius: 1, y: -1)
+
+                Image(systemName: "sparkle")
+                    .font(.system(size: 27, weight: .bold))
+                    .foregroundStyle(.white)
+                    .rotationEffect(.degrees(isWorking && isAnimating ? 360 : 0))
+                    .scaleEffect(isWorking && isAnimating ? 1.1 : 1)
+                    .animation(isWorking ? .linear(duration: 1.4).repeatForever(autoreverses: false) : .default, value: isAnimating)
+            }
+            .frame(width: 52, height: 52)
+            .padding(2)
+            .overlay(alignment: .topTrailing) {
+                if activeTaskCount > 0 {
+                    activeTaskBadge
+                }
+            }
+        }
+        .buttonStyle(.plain)
+        .help("展开任务列表")
+        .onAppear {
+            isAnimating = isWorking
+        }
+        .onChange(of: isWorking) { _, newValue in
+            if newValue {
+                isAnimating = false
+                DispatchQueue.main.async {
+                    isAnimating = true
+                }
+            } else {
+                isAnimating = false
+            }
+        }
+    }
+
+    private var activeTaskBadge: some View {
+        Text("\(min(activeTaskCount, 99))")
+            .font(.system(size: 11, weight: .bold))
+            .foregroundStyle(.white)
+            .lineLimit(1)
+            .minimumScaleFactor(0.7)
+            .frame(minWidth: 18, minHeight: 18)
+            .padding(.horizontal, activeTaskCount > 9 ? 3 : 0)
+            .background(Color.red)
+            .clipShape(Capsule())
+            .overlay {
+                Capsule()
+                    .stroke(Color.white.opacity(0.85), lineWidth: 1)
+            }
+            .offset(x: 5, y: -5)
+    }
+
+    private var iconGradient: LinearGradient {
+        LinearGradient(
+            colors: [
+                Color(red: 0.62, green: 0.55, blue: 1.0),
+                Color(red: 0.72, green: 0.48, blue: 0.98),
+                Color(red: 0.46, green: 0.68, blue: 1.0)
+            ],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
     }
 }
 
