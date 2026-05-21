@@ -16,12 +16,12 @@ struct TaskSnapApp: App {
                 isCollapsed: $isTaskBoardCollapsed
             )
             .frame(
-                minWidth: isTaskBoardCollapsed ? 56 : 320,
-                idealWidth: isTaskBoardCollapsed ? 56 : 520,
-                maxWidth: isTaskBoardCollapsed ? 56 : .infinity,
-                minHeight: isTaskBoardCollapsed ? 56 : 420,
-                idealHeight: isTaskBoardCollapsed ? 56 : 420,
-                maxHeight: isTaskBoardCollapsed ? 56 : .infinity
+                minWidth: isTaskBoardCollapsed ? 72 : 320,
+                idealWidth: isTaskBoardCollapsed ? 72 : 520,
+                maxWidth: isTaskBoardCollapsed ? 72 : .infinity,
+                minHeight: isTaskBoardCollapsed ? 72 : 420,
+                idealHeight: isTaskBoardCollapsed ? 72 : 420,
+                maxHeight: isTaskBoardCollapsed ? 72 : .infinity
             )
             .background(WindowConfigurator(isCollapsed: isTaskBoardCollapsed))
             .onAppear {

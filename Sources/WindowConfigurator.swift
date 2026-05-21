@@ -44,17 +44,18 @@ struct WindowConfigurator: NSViewRepresentable {
             if coordinator.expandedFrame == nil, window.frame.width > 80, window.frame.height > 80 {
                 coordinator.expandedFrame = window.frame
             }
-            setWindow(window, size: CGSize(width: 56, height: 56), animated: true)
+            setCollapsedWindowFrame(window, size: CGSize(width: 72, height: 72), animated: true)
         } else if let expandedFrame = coordinator.expandedFrame {
             window.setFrame(expandedFrame, display: true, animate: true)
             coordinator.expandedFrame = nil
         }
     }
 
-    private func setWindow(_ window: NSWindow, size: CGSize, animated: Bool) {
+    private func setCollapsedWindowFrame(_ window: NSWindow, size: CGSize, animated: Bool) {
         var frame = window.frame
         frame.origin.y += frame.height - size.height
         frame.size = size
+
         window.setFrame(frame, display: true, animate: animated)
     }
 

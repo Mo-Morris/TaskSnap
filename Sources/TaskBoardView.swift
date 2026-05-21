@@ -29,14 +29,14 @@ struct TaskBoardView: View {
         }
         .overlay {
             if !isCollapsed || isDropTargeted {
-                RoundedRectangle(cornerRadius: isCollapsed ? 28 : 14)
+                RoundedRectangle(cornerRadius: isCollapsed ? 36 : 14)
                     .stroke(
                         isDropTargeted ? Color.accentColor : Color.white.opacity(0.18),
                         lineWidth: isDropTargeted ? 2 : 1
                     )
             }
         }
-        .clipShape(RoundedRectangle(cornerRadius: isCollapsed ? 28 : 14, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: isCollapsed ? 36 : 14, style: .continuous))
         .onDrop(
             of: [UTType.image.identifier, UTType.fileURL.identifier, UTType.png.identifier, UTType.jpeg.identifier],
             isTargeted: $isDropTargeted,
@@ -51,6 +51,7 @@ struct TaskBoardView: View {
         }
         .focusable()
         .focused($isPasteTargetFocused)
+        .focusEffectDisabled()
         .onAppear {
             isPasteTargetFocused = true
         }
@@ -247,43 +248,97 @@ private struct CollapsedTaskIconView: View {
     let onExpand: () -> Void
 
     @State private var isAnimating = false
+    @State private var isHovered = false
+    @State private var isHinting = false
 
     var body: some View {
-        Button(action: onExpand) {
-            ZStack {
-                Circle()
-                    .fill(iconGradient)
-                    .shadow(color: Color(red: 0.54, green: 0.36, blue: 0.96).opacity(0.2), radius: 14, y: 5)
-                    .shadow(color: Color.white.opacity(0.9), radius: 1, y: -1)
+        iconArtwork
+            .frame(width: 64, height: 64)
+            .padding(4)
+            .scaleEffect(isHovered ? 1.04 : 1)
+            .animation(.spring(response: 0.22, dampingFraction: 0.78), value: isHovered)
+            .contentShape(Circle())
+            .onTapGesture(perform: onExpand)
+            .onHover { isHovered = $0 }
+            .help("展开任务列表")
+            .accessibilityLabel("展开任务列表")
+            .accessibilityAddTraits(.isButton)
+            .onAppear {
+                isAnimating = isWorking
+                isHinting = true
+            }
+            .onChange(of: isWorking) { _, newValue in
+                if newValue {
+                    isAnimating = false
+                    DispatchQueue.main.async {
+                        isAnimating = true
+                    }
+                } else {
+                    isAnimating = false
+                }
+            }
+    }
 
-                Image(systemName: "sparkle")
-                    .font(.system(size: 27, weight: .bold))
-                    .foregroundStyle(.white)
-                    .rotationEffect(.degrees(isWorking && isAnimating ? 360 : 0))
-                    .scaleEffect(isWorking && isAnimating ? 1.1 : 1)
-                    .animation(isWorking ? .linear(duration: 1.4).repeatForever(autoreverses: false) : .default, value: isAnimating)
-            }
-            .frame(width: 52, height: 52)
-            .padding(2)
-            .overlay(alignment: .topTrailing) {
-                if activeTaskCount > 0 {
-                    activeTaskBadge
+    private var iconArtwork: some View {
+        ZStack {
+            Circle()
+                .fill(iconGradient)
+                .scaleEffect(isHinting ? 1.18 : 0.92)
+                .opacity(isHinting ? 0 : 0.24)
+                .animation(.easeOut(duration: 1.7).repeatForever(autoreverses: false), value: isHinting)
+
+            Circle()
+                .fill(iconGradient)
+                .shadow(color: Color(red: 0.54, green: 0.36, blue: 0.96).opacity(isHovered ? 0.28 : 0.18), radius: isHovered ? 16 : 12, y: 5)
+                .shadow(color: Color.white.opacity(0.88), radius: 1, y: -1)
+                .scaleEffect(isHinting ? 1.02 : 1)
+                .animation(.easeInOut(duration: 1.7).repeatForever(autoreverses: true), value: isHinting)
+
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color.white.opacity(0.3))
+                .frame(width: 30, height: 37)
+                .rotationEffect(.degrees(-8))
+                .offset(x: -4, y: 1)
+
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color.white)
+                .frame(width: 32, height: 38)
+                .shadow(color: Color.black.opacity(0.08), radius: 4, y: 2)
+
+            VStack(spacing: 4) {
+                RoundedRectangle(cornerRadius: 3, style: .continuous)
+                    .fill(Color(red: 0.61, green: 0.52, blue: 0.98).opacity(0.22))
+                    .frame(width: 18, height: 12)
+                    .overlay {
+                        Image(systemName: "photo")
+                            .font(.system(size: 8, weight: .semibold))
+                            .foregroundStyle(Color(red: 0.58, green: 0.42, blue: 0.96))
+                    }
+
+                HStack(spacing: 3) {
+                    Circle()
+                        .fill(Color(red: 0.24, green: 0.78, blue: 0.54))
+                        .frame(width: 6, height: 6)
+
+                    RoundedRectangle(cornerRadius: 2, style: .continuous)
+                        .fill(Color(red: 0.58, green: 0.42, blue: 0.96).opacity(0.3))
+                        .frame(width: 14, height: 5)
                 }
             }
-        }
-        .buttonStyle(.plain)
-        .help("展开任务列表")
-        .onAppear {
-            isAnimating = isWorking
-        }
-        .onChange(of: isWorking) { _, newValue in
-            if newValue {
-                isAnimating = false
-                DispatchQueue.main.async {
-                    isAnimating = true
-                }
-            } else {
-                isAnimating = false
+            .offset(y: 1)
+
+            Image(systemName: "sparkle")
+                .font(.system(size: 20, weight: .bold))
+                .foregroundStyle(Color.white)
+                .shadow(color: Color(red: 0.43, green: 0.22, blue: 0.86).opacity(0.22), radius: 2, y: 1)
+                .rotationEffect(.degrees(isWorking && isAnimating ? 360 : 0))
+                .scaleEffect(isWorking && isAnimating ? 1.08 : 1)
+                .offset(x: 13, y: -13)
+                .animation(isWorking ? .linear(duration: 1.4).repeatForever(autoreverses: false) : .default, value: isAnimating)
+
+            if activeTaskCount > 0 {
+                activeTaskBadge
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
             }
         }
     }
@@ -356,49 +411,154 @@ private struct TaskRow: View {
     let onDelete: () -> Void
     let onPreview: () -> Void
 
+    private var cardColor: Color {
+        Color(hex: task.backgroundColorHex)
+    }
+
+    private var displayTitle: String {
+        splitTitleAndDescription.title
+    }
+
+    private var displayDescription: String {
+        splitTitleAndDescription.description
+    }
+
+    private var splitTitleAndDescription: (title: String, description: String) {
+        let normalized = task.title
+            .replacingOccurrences(of: "\n", with: " ")
+            .replacingOccurrences(of: "  ", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !normalized.isEmpty else {
+            return ("未命名截图任务", "等待视觉模型补全截图里的任务线索。")
+        }
+
+        let separators = CharacterSet(charactersIn: "。！？!?；;，,")
+        if let separatorRange = normalized.rangeOfCharacter(from: separators) {
+            let title = String(normalized[..<separatorRange.lowerBound])
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let descriptionStart = normalized.index(after: separatorRange.lowerBound)
+            let description = String(normalized[descriptionStart...])
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+
+            if !title.isEmpty, !description.isEmpty {
+                return (title, description)
+            }
+        }
+
+        if normalized.count > 18 {
+            let splitIndex = normalized.index(normalized.startIndex, offsetBy: 18)
+            let title = String(normalized[..<splitIndex])
+            let description = String(normalized[splitIndex...])
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return (title, description.isEmpty ? "查看截图，快速回到这项任务的上下文。" : description)
+        }
+
+        return (normalized, "查看截图，快速回到这项任务的上下文。")
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(task.title)
-                    .font(.callout.weight(.semibold))
-                    .strikethrough(task.isDone)
-                    .foregroundStyle(task.isDone ? .secondary : .primary)
-                    .lineLimit(2)
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 10) {
+                Button(action: onToggle) {
+                    Image(systemName: task.isDone ? "checkmark.circle.fill" : "circle")
+                        .font(.system(size: 22, weight: .semibold))
+                        .foregroundStyle(task.isDone ? Color.green : Color.secondary)
+                        .frame(width: 28, height: 28)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help(task.isDone ? "标记为未完成" : "划掉任务")
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(displayTitle)
+                        .font(.system(size: 20, weight: .bold, design: .rounded))
+                        .foregroundStyle(task.isDone ? .secondary : .primary)
+                        .strikethrough(task.isDone)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Text(displayDescription)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
 
                 Spacer(minLength: 8)
 
-                TaskRowIconButton(
-                    systemName: task.isDone ? "checkmark.circle.fill" : "circle",
-                    foregroundStyle: task.isDone ? .green : .secondary,
-                    help: task.isDone ? "标记为未完成" : "划掉任务",
-                    action: onToggle
-                )
+                VStack(alignment: .trailing, spacing: 8) {
+                    Text(task.isDone ? "已完成" : "进行中")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(task.isDone ? Color.green : Color.accentColor)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(.thinMaterial)
+                        .clipShape(Capsule())
 
-                TaskRowIconButton(
-                    systemName: "trash",
-                    foregroundStyle: .secondary,
-                    help: "删除任务",
-                    action: onDelete
-                )
+                    TaskRowIconButton(
+                        systemName: "trash",
+                        foregroundStyle: .secondary,
+                        help: "删除任务",
+                        action: onDelete
+                    )
+                }
             }
 
             if let image = NSImage(data: task.imageData) {
                 Button(action: onPreview) {
-                    Image(nsImage: image)
-                        .resizable()
-                        .scaledToFill()
-                        .frame(height: 112)
-                        .frame(maxWidth: .infinity)
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                        .opacity(task.isDone ? 0.45 : 1)
+                    ZStack(alignment: .bottomLeading) {
+                        Image(nsImage: image)
+                            .resizable()
+                            .scaledToFill()
+                            .frame(height: 156)
+                            .frame(maxWidth: .infinity)
+                            .clipped()
+                            .opacity(task.isDone ? 0.5 : 1)
+
+                        LinearGradient(
+                            colors: [
+                                Color.black.opacity(0.34),
+                                Color.black.opacity(0)
+                            ],
+                            startPoint: .bottom,
+                            endPoint: .center
+                        )
+
+                        Label("查看截图", systemImage: "arrow.up.left.and.arrow.down.right")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 9)
+                            .padding(.vertical, 6)
+                            .background(Color.black.opacity(0.28))
+                            .clipShape(Capsule())
+                            .padding(10)
+                    }
+                    .frame(height: 156)
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .stroke(Color.white.opacity(0.55), lineWidth: 1)
+                    }
                 }
                 .buttonStyle(.plain)
                 .help("点击放大截图")
             }
         }
-        .padding(10)
-        .background(Color(hex: task.backgroundColorHex).opacity(task.isDone ? 0.5 : 1))
-        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .padding(12)
+        .background {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(cardColor.opacity(task.isDone ? 0.42 : 0.9))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(.regularMaterial.opacity(task.isDone ? 0.35 : 0.12))
+                }
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(Color.white.opacity(0.7), lineWidth: 1)
+        }
+        .shadow(color: Color.black.opacity(task.isDone ? 0.04 : 0.1), radius: 12, y: 6)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
