@@ -261,6 +261,7 @@ private struct CollapsedTaskIconView: View {
     @State private var isAnimating = false
     @State private var isHovered = false
     @State private var isHinting = false
+    @State private var didDrag = false
 
     var body: some View {
         iconArtwork
@@ -275,7 +276,11 @@ private struct CollapsedTaskIconView: View {
             .scaleEffect(isHovered ? 1.04 : 1)
             .animation(.spring(response: 0.22, dampingFraction: 0.78), value: isHovered)
             .contentShape(Circle())
-            .onTapGesture(perform: onExpand)
+            .simultaneousGesture(dragDetectionGesture)
+            .onTapGesture {
+                guard !didDrag else { return }
+                onExpand()
+            }
             .onHover { isHovered = $0 }
             .help("展开任务列表")
             .accessibilityLabel("展开任务列表")
@@ -293,6 +298,20 @@ private struct CollapsedTaskIconView: View {
                     }
                 } else {
                     isAnimating = false
+                }
+            }
+    }
+
+    private var dragDetectionGesture: some Gesture {
+        DragGesture(minimumDistance: 3)
+            .onChanged { value in
+                if abs(value.translation.width) > 3 || abs(value.translation.height) > 3 {
+                    didDrag = true
+                }
+            }
+            .onEnded { _ in
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                    didDrag = false
                 }
             }
     }
