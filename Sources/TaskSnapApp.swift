@@ -23,7 +23,7 @@ struct TaskSnapApp: App {
                 idealHeight: isTaskBoardCollapsed ? 72 : 420,
                 maxHeight: isTaskBoardCollapsed ? 72 : .infinity
             )
-            .background(WindowConfigurator(isCollapsed: isTaskBoardCollapsed))
+            .background(WindowConfigurator(isCollapsed: $isTaskBoardCollapsed))
             .onAppear {
                 appDelegate.pasteCommandDispatcher = pasteCommandDispatcher
             }

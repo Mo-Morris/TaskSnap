@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 struct WindowConfigurator: NSViewRepresentable {
-    let isCollapsed: Bool
+    @Binding var isCollapsed: Bool
 
     func makeNSView(context: Context) -> NSView {
         let view = NSView()
@@ -27,6 +27,10 @@ struct WindowConfigurator: NSViewRepresentable {
     }
 
     private func configure(_ window: NSWindow, coordinator: Coordinator) {
+        coordinator.isCollapsed = $isCollapsed
+        coordinator.windowHeight = window.frame.height
+        coordinator.installDoubleClickMonitor(for: window)
+
         window.level = .floating
         window.isMovableByWindowBackground = true
         window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
@@ -61,5 +65,44 @@ struct WindowConfigurator: NSViewRepresentable {
 
     final class Coordinator {
         var expandedFrame: NSRect?
+        var isCollapsed: Binding<Bool>?
+        var windowHeight: CGFloat = 0
+        private weak var window: NSWindow?
+        private var doubleClickMonitor: Any?
+
+        deinit {
+            if let doubleClickMonitor {
+                NSEvent.removeMonitor(doubleClickMonitor)
+            }
+        }
+
+        func installDoubleClickMonitor(for window: NSWindow) {
+            self.window = window
+
+            guard doubleClickMonitor == nil else {
+                return
+            }
+
+            doubleClickMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak self, weak window] event in
+                guard
+                    let self,
+                    let window,
+                    event.window === window,
+                    event.clickCount == 2,
+                    self.isCollapsed?.wrappedValue == false,
+                    self.isInTopCollapseArea(event.locationInWindow)
+                else {
+                    return event
+                }
+
+                self.isCollapsed?.wrappedValue = true
+                return nil
+            }
+        }
+
+        private func isInTopCollapseArea(_ location: NSPoint) -> Bool {
+            let topCollapseAreaHeight: CGFloat = 48
+            return windowHeight - location.y <= topCollapseAreaHeight
+        }
     }
 }

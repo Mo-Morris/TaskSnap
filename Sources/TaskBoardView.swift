@@ -89,8 +89,6 @@ struct TaskBoardView: View {
 
     private var expandedBoard: some View {
         VStack(spacing: 0) {
-            header
-
             if store.tasks.isEmpty {
                 emptyState
             } else {
@@ -98,36 +96,6 @@ struct TaskBoardView: View {
             }
         }
         .background(.regularMaterial)
-    }
-
-    private var header: some View {
-        HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("多任务并行备忘录")
-                    .font(.headline)
-                Text("\(activeTaskCount) 个任务进行中")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            Spacer()
-
-            Button {
-                withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
-                    isCollapsed = true
-                }
-            } label: {
-                Image(systemName: "chevron.down.circle")
-                    .font(.title3)
-                    .foregroundStyle(.secondary)
-                    .frame(width: 28, height: 28)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .help("收缩为悬浮图标")
-        }
-        .padding(16)
-        .background(Color.black.opacity(0.08))
     }
 
     private var emptyState: some View {
@@ -254,6 +222,12 @@ private struct CollapsedTaskIconView: View {
     var body: some View {
         iconArtwork
             .frame(width: 64, height: 64)
+            .overlay(alignment: .topTrailing) {
+                if activeTaskCount > 0 {
+                    activeTaskBadge
+                        .offset(x: -2, y: 3)
+                }
+            }
             .padding(4)
             .scaleEffect(isHovered ? 1.04 : 1)
             .animation(.spring(response: 0.22, dampingFraction: 0.78), value: isHovered)
@@ -262,6 +236,7 @@ private struct CollapsedTaskIconView: View {
             .onHover { isHovered = $0 }
             .help("展开任务列表")
             .accessibilityLabel("展开任务列表")
+            .accessibilityValue(activeTaskCount > 0 ? "\(activeTaskCount) 个任务进行中" : "没有进行中的任务")
             .accessibilityAddTraits(.isButton)
             .onAppear {
                 isAnimating = isWorking
@@ -335,29 +310,25 @@ private struct CollapsedTaskIconView: View {
                 .scaleEffect(isWorking && isAnimating ? 1.08 : 1)
                 .offset(x: 13, y: -13)
                 .animation(isWorking ? .linear(duration: 1.4).repeatForever(autoreverses: false) : .default, value: isAnimating)
-
-            if activeTaskCount > 0 {
-                activeTaskBadge
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-            }
         }
     }
 
     private var activeTaskBadge: some View {
-        Text("\(min(activeTaskCount, 99))")
+        Text(activeTaskCount > 99 ? "99+" : "\(activeTaskCount)")
             .font(.system(size: 11, weight: .bold))
+            .monospacedDigit()
             .foregroundStyle(.white)
             .lineLimit(1)
-            .minimumScaleFactor(0.7)
-            .frame(minWidth: 18, minHeight: 18)
-            .padding(.horizontal, activeTaskCount > 9 ? 3 : 0)
+            .minimumScaleFactor(0.75)
+            .frame(minWidth: activeTaskCount > 99 ? 28 : 20, minHeight: 20)
+            .padding(.horizontal, activeTaskCount > 9 ? 4 : 0)
             .background(Color.red)
             .clipShape(Capsule())
             .overlay {
                 Capsule()
                     .stroke(Color.white.opacity(0.85), lineWidth: 1)
             }
-            .offset(x: 5, y: -5)
+            .shadow(color: Color.black.opacity(0.16), radius: 3, y: 1)
     }
 
     private var iconGradient: LinearGradient {
