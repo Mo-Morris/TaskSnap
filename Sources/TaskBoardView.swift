@@ -499,6 +499,29 @@ private struct TaskRow: View {
         Color(hex: task.backgroundColorHex)
     }
 
+    private var manualIconColor: Color {
+        switch task.backgroundColorHex.uppercased() {
+        case "#F8E7E0":
+            Color(red: 0.72, green: 0.27, blue: 0.18)
+        case "#E8F2D9":
+            Color(red: 0.32, green: 0.48, blue: 0.16)
+        case "#DDEFF5":
+            Color(red: 0.16, green: 0.45, blue: 0.58)
+        case "#F7EDCC":
+            Color(red: 0.60, green: 0.43, blue: 0.08)
+        case "#E9E4F7":
+            Color(red: 0.43, green: 0.32, blue: 0.68)
+        case "#DDF1EA":
+            Color(red: 0.16, green: 0.48, blue: 0.39)
+        case "#F5E0EC":
+            Color(red: 0.64, green: 0.25, blue: 0.47)
+        case "#E6EDF9":
+            Color(red: 0.23, green: 0.39, blue: 0.68)
+        default:
+            Color(nsColor: .labelColor).opacity(0.78)
+        }
+    }
+
     private var isDraggingHorizontally: Bool {
         dragMode == .horizontal && abs(horizontalOffset) > 4
     }
@@ -637,8 +660,9 @@ private struct TaskRow: View {
                 Text(displayDescription)
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.75)
+                    .lineLimit(nil)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .multilineTextAlignment(.leading)
 
                 SourceBadge(source: task.inputSource)
             }
@@ -792,17 +816,17 @@ private struct TaskRow: View {
 
     private var manualIconTile: some View {
         RoundedRectangle(cornerRadius: 18, style: .continuous)
-            .fill(Color.white.opacity(0.76))
+            .fill(Color.white.opacity(0.9))
             .frame(width: 36, height: 36)
             .overlay {
                 Image(systemName: task.manualIconName ?? TaskItem.randomManualIconName())
                     .font(.system(size: 15, weight: .semibold))
                     .symbolRenderingMode(.hierarchical)
-                    .foregroundStyle(cardColor.opacity(0.95))
+                    .foregroundStyle(manualIconColor.opacity(task.isDone ? 0.62 : 1))
             }
             .overlay {
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .stroke(Color.black.opacity(0.08), lineWidth: 1)
+                    .stroke(Color.black.opacity(0.12), lineWidth: 1)
             }
             .shadow(color: Color.black.opacity(0.04), radius: 10, y: 4)
     }
