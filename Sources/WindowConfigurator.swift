@@ -54,8 +54,13 @@ struct WindowConfigurator: NSViewRepresentable {
             if coordinator.expandedFrame == nil, window.frame.width > 80, window.frame.height > 80 {
                 coordinator.expandedFrame = window.frame
             }
-            setCollapsedWindowFrame(window, size: CGSize(width: 72, height: 72), animated: true)
+            if let collapsedFrame = coordinator.collapsedFrame {
+                window.setFrame(collapsedFrame, display: true, animate: true)
+            } else {
+                setCollapsedWindowFrame(window, size: CGSize(width: 72, height: 72), animated: true)
+            }
         } else if let expandedFrame = coordinator.expandedFrame {
+            coordinator.collapsedFrame = window.frame
             window.setFrame(expandedFrame, display: true, animate: true)
             coordinator.expandedFrame = nil
         }
@@ -71,6 +76,7 @@ struct WindowConfigurator: NSViewRepresentable {
 
     final class Coordinator {
         var expandedFrame: NSRect?
+        var collapsedFrame: NSRect?
         var isCollapsed: Binding<Bool>?
         var windowHeight: CGFloat = 0
         private weak var window: NSWindow?
