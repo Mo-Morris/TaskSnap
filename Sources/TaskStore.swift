@@ -57,7 +57,7 @@ final class TaskStore: ObservableObject {
         }
 
         let taskTitle = title ?? "截图任务 \(titleFormatter.string(from: Date()))"
-        let task = TaskItem(title: taskTitle, imageData: data)
+        let task = TaskItem(title: taskTitle, imageData: data, inputSource: .screenshot)
         tasks.insert(task, at: 0)
         summarizeTaskIfConfigured(task)
         return true
@@ -74,6 +74,26 @@ final class TaskStore: ObservableObject {
         }
 
         addImageData(data, title: "剪贴板截图 \(titleFormatter.string(from: Date()))")
+        return true
+    }
+
+    @discardableResult
+    func addManualTask(title: String, description: String) -> Bool {
+        let normalizedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedDescription = description.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !normalizedTitle.isEmpty, !normalizedDescription.isEmpty else {
+            return false
+        }
+
+        let task = TaskItem(
+            title: normalizedTitle,
+            description: normalizedDescription,
+            backgroundColorHex: TaskItem.randomLightColorHex(),
+            inputSource: .manual,
+            manualIconName: TaskItem.randomManualIconName()
+        )
+        tasks.insert(task, at: 0)
         return true
     }
 
@@ -168,7 +188,7 @@ final class TaskStore: ObservableObject {
     }
 
     private func summarizeTaskIfConfigured(_ task: TaskItem) {
-        guard let configuration = visionConfiguration else {
+        guard let configuration = visionConfiguration, let imageData = task.imageData else {
             return
         }
 
@@ -176,7 +196,7 @@ final class TaskStore: ObservableObject {
 
         Task {
             do {
-                let summary = try await visionSummarizer.summarize(imageData: task.imageData, configuration: configuration)
+                let summary = try await visionSummarizer.summarize(imageData: imageData, configuration: configuration)
                 updateTitle(for: task.id, title: summary)
             } catch {
                 updateTitle(for: task.id, title: "\(task.title)（总结失败）")

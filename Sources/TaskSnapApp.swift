@@ -3,7 +3,6 @@ import SwiftUI
 @main
 struct TaskSnapApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-    @Environment(\.openSettings) private var openSettings
     @StateObject private var store = TaskStore()
     @StateObject private var pasteCommandDispatcher = PasteCommandDispatcher()
     @State private var isTaskBoardCollapsed = false
@@ -17,10 +16,10 @@ struct TaskSnapApp: App {
             )
             .frame(
                 minWidth: isTaskBoardCollapsed ? 72 : 320,
-                idealWidth: isTaskBoardCollapsed ? 72 : 520,
+                idealWidth: isTaskBoardCollapsed ? 72 : 912,
                 maxWidth: isTaskBoardCollapsed ? 72 : .infinity,
                 minHeight: isTaskBoardCollapsed ? 72 : 420,
-                idealHeight: isTaskBoardCollapsed ? 72 : 420,
+                idealHeight: isTaskBoardCollapsed ? 72 : 980,
                 maxHeight: isTaskBoardCollapsed ? 72 : .infinity
             )
             .background {
@@ -33,13 +32,6 @@ struct TaskSnapApp: App {
         }
         .windowStyle(.hiddenTitleBar)
         .commands {
-            CommandGroup(replacing: .appSettings) {
-                Button("视觉模型设置...") {
-                    openSettings()
-                }
-                .keyboardShortcut(",", modifiers: [.command])
-            }
-
             CommandGroup(replacing: .newItem) {
                 Button("清空已完成任务") {
                     store.clearCompleted()

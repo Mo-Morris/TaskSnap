@@ -10,6 +10,7 @@ struct TaskBoardView: View {
     @State private var isDropTargeted = false
     @State private var previewTask: TaskItem?
     @State private var inputAlert: InputAlert?
+    @State private var isShowingManualTaskForm = false
     @State private var draggingTaskID: TaskItem.ID?
     @State private var dragVerticalOffset: CGFloat = 0
     @State private var reorderTargetIndex: Int?
@@ -65,6 +66,11 @@ struct TaskBoardView: View {
         .sheet(item: $previewTask) { task in
             ImagePreviewView(task: task)
         }
+        .sheet(isPresented: $isShowingManualTaskForm) {
+            ManualTaskFormView { title, description in
+                store.addManualTask(title: title, description: description)
+            }
+        }
         .alert(inputAlert?.title ?? "", isPresented: Binding(
             get: { inputAlert != nil },
             set: { if !$0 { inputAlert = nil } }
@@ -90,6 +96,8 @@ struct TaskBoardView: View {
 
     private var expandedBoard: some View {
         VStack(spacing: 0) {
+            titleBar
+
             if store.tasks.isEmpty {
                 emptyState
             } else {
@@ -97,6 +105,39 @@ struct TaskBoardView: View {
             }
         }
         .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    private var titleBar: some View {
+        HStack {
+            Spacer()
+
+            Button {
+                isShowingManualTaskForm = true
+            } label: {
+                Image(systemName: "plus")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Color.primary.opacity(0.78))
+                    .frame(width: 20, height: 20)
+                    .background(Color.white.opacity(0.76))
+                    .clipShape(Circle())
+                    .overlay {
+                        Circle()
+                            .stroke(Color.black.opacity(0.08), lineWidth: 1)
+                    }
+            }
+            .buttonStyle(.plain)
+            .pointingHandCursor()
+            .help("新建手动任务")
+            .accessibilityLabel("新建手动任务")
+        }
+        .frame(height: 40)
+        .padding(.horizontal, 28)
+        .background(Color(nsColor: .windowBackgroundColor))
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(Color.black.opacity(0.09))
+                .frame(height: 1)
+        }
     }
 
     private var emptyState: some View {
@@ -125,7 +166,7 @@ struct TaskBoardView: View {
 
     private var taskList: some View {
         ScrollView {
-            LazyVStack(spacing: 10) {
+            LazyVStack(spacing: 14) {
                 ForEach(Array(store.tasks.enumerated()), id: \.element.id) { index, task in
                     if reorderTargetIndex == index, draggingTaskID != nil {
                         ReorderInsertionIndicator()
@@ -152,7 +193,8 @@ struct TaskBoardView: View {
                         if store.summarizingTaskIDs.contains(task.id) {
                             ProgressView()
                                 .controlSize(.small)
-                                .padding(8)
+                                .padding(.top, 48)
+                                .padding(.trailing, 22)
                                 .allowsHitTesting(false)
                         }
                     }
@@ -162,7 +204,9 @@ struct TaskBoardView: View {
                     ReorderInsertionIndicator()
                 }
             }
-            .padding(12)
+            .padding(.horizontal, 28)
+            .padding(.top, 10)
+            .padding(.bottom, 18)
             .frame(maxWidth: .infinity)
         }
         .frame(maxWidth: .infinity)
@@ -172,7 +216,7 @@ struct TaskBoardView: View {
         draggingTaskID = task.id
         dragVerticalOffset = verticalOffset
 
-        let rowStep: CGFloat = 124
+        let rowStep: CGFloat = 146
         let rawIndex = CGFloat(sourceIndex) + (verticalOffset / rowStep).rounded()
         reorderTargetIndex = min(max(Int(rawIndex), 0), store.tasks.count)
     }
@@ -468,7 +512,12 @@ private struct TaskRow: View {
     }
 
     private var displayDescription: String {
-        splitTitleAndDescription.description
+        if let description = task.description?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !description.isEmpty {
+            return description
+        }
+
+        return splitTitleAndDescription.description
     }
 
     private var splitTitleAndDescription: (title: String, description: String) {
@@ -558,7 +607,7 @@ private struct TaskRow: View {
                 )
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .contentShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
         .gesture(rowDragGesture)
         .onHover { isHovering = $0 }
         .contextMenu {
@@ -573,39 +622,46 @@ private struct TaskRow: View {
     }
 
     private var cardContent: some View {
-        HStack(alignment: .center, spacing: 12) {
-            thumbnail
+        HStack(alignment: .center, spacing: 26) {
+            leadingVisual
 
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 22) {
                 Text(displayTitle)
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(.system(size: 29, weight: .bold))
                     .foregroundStyle(task.isDone ? .secondary : .primary)
                     .strikethrough(task.isDone)
                     .lineLimit(2)
-                    .minimumScaleFactor(0.84)
+                    .minimumScaleFactor(0.72)
                     .multilineTextAlignment(.leading)
 
                 Text(displayDescription)
-                    .font(.system(size: 12.5))
+                    .font(.system(size: 19, weight: .regular))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
-                    .minimumScaleFactor(0.82)
+                    .minimumScaleFactor(0.75)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
             DragGrip()
                 .opacity(dragMode == .vertical || isHovering ? 0.62 : 0)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
+        .padding(.leading, 24)
+        .padding(.trailing, 24)
+        .padding(.vertical, 16)
+        .frame(minHeight: 132)
         .background {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(cardColor.opacity(task.isDone ? 0.2 : 0.48))
+            RoundedRectangle(cornerRadius: 13, style: .continuous)
+                .fill(cardColor.opacity(task.isDone ? 0.18 : 0.34))
         }
         .overlay {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(Color.black.opacity(0.1), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 13, style: .continuous)
+                .stroke(cardColor.opacity(0.72), lineWidth: 1.2)
                 .allowsHitTesting(false)
+        }
+        .overlay(alignment: .topTrailing) {
+            SourceBadge(source: task.inputSource)
+                .padding(.top, 16)
+                .padding(.trailing, 18)
         }
         .opacity(task.isDone ? 0.68 : 1)
     }
@@ -677,52 +733,99 @@ private struct TaskRow: View {
         }
     }
 
+    private var leadingVisual: some View {
+        Group {
+            switch task.inputSource {
+            case .screenshot:
+                thumbnail
+            case .manual:
+                manualIconTile
+            }
+        }
+        .frame(width: 104, height: 96)
+    }
+
     @ViewBuilder
     private var thumbnail: some View {
-        if let image = NSImage(data: task.imageData) {
+        if let data = task.imageData, let image = NSImage(data: data) {
             Button(action: onPreview) {
                 ZStack(alignment: .bottomTrailing) {
                     Image(nsImage: image)
                         .resizable()
                         .scaledToFill()
-                        .frame(width: 94, height: 92)
+                        .frame(width: 104, height: 96)
                         .clipped()
                         .opacity(task.isDone ? 0.5 : 1)
 
                     Image(systemName: "arrow.up.left.and.arrow.down.right")
-                        .font(.system(size: 11, weight: .semibold))
+                        .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(.white)
                         .frame(width: 24, height: 24)
-                        .background(Color.black.opacity(0.42))
+                        .background(Color.black.opacity(0.38))
                         .clipShape(Circle())
-                        .padding(6)
+                        .padding(7)
                 }
-                .frame(width: 94, height: 92)
-                .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+                .frame(width: 104, height: 96)
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                 .overlay {
-                    RoundedRectangle(cornerRadius: 5, style: .continuous)
-                        .stroke(Color.black.opacity(0.12), lineWidth: 1)
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(Color.black.opacity(0.14), lineWidth: 1.2)
                 }
-                .contentShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+                .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             }
             .buttonStyle(.plain)
             .pointingHandCursor()
             .help("点击查看大图")
             .accessibilityLabel("查看截图大图")
         } else {
-            RoundedRectangle(cornerRadius: 5, style: .continuous)
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(Color.white.opacity(0.72))
-                .frame(width: 94, height: 92)
+                .frame(width: 104, height: 96)
                 .overlay {
                     Text("图片缩略图")
-                        .font(.caption)
+                        .font(.system(size: 12))
                         .foregroundStyle(.secondary)
                 }
                 .overlay {
-                    RoundedRectangle(cornerRadius: 5, style: .continuous)
-                        .stroke(Color.black.opacity(0.12), lineWidth: 1)
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(Color.black.opacity(0.14), lineWidth: 1.2)
                 }
         }
+    }
+
+    private var manualIconTile: some View {
+        RoundedRectangle(cornerRadius: 18, style: .continuous)
+            .fill(Color.white.opacity(0.76))
+            .frame(width: 78, height: 78)
+            .overlay {
+                Image(systemName: task.manualIconName ?? TaskItem.randomManualIconName())
+                    .font(.system(size: 28, weight: .semibold))
+                    .symbolRenderingMode(.hierarchical)
+                    .foregroundStyle(cardColor.opacity(0.95))
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(Color.black.opacity(0.08), lineWidth: 1)
+            }
+            .shadow(color: Color.black.opacity(0.04), radius: 10, y: 4)
+    }
+}
+
+private struct SourceBadge: View {
+    let source: TaskInputSource
+
+    var body: some View {
+        Text(source.label)
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(Color.white.opacity(0.62))
+            .clipShape(Capsule())
+            .overlay {
+                Capsule()
+                    .stroke(Color.black.opacity(0.06), lineWidth: 1)
+            }
     }
 }
 
@@ -841,6 +944,91 @@ private extension View {
     }
 }
 
+private struct ManualTaskFormView: View {
+    let onCreate: (String, String) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var title = ""
+    @State private var description = ""
+    @FocusState private var isTitleFocused: Bool
+
+    private var canCreate: Bool {
+        !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 22) {
+            HStack {
+                Text("新建任务")
+                    .font(.system(size: 24, weight: .bold))
+
+                Spacer()
+
+                Button {
+                    dismiss()
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.title2)
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("关闭")
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("任务名称")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.secondary)
+
+                TextField("例如：明天确认上线计划", text: $title)
+                    .textFieldStyle(.roundedBorder)
+                    .focused($isTitleFocused)
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("任务描述")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.secondary)
+
+                TextEditor(text: $description)
+                    .font(.system(size: 14))
+                    .scrollContentBackground(.hidden)
+                    .padding(8)
+                    .frame(height: 118)
+                    .background(Color(nsColor: .textBackgroundColor))
+                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .stroke(Color.black.opacity(0.12), lineWidth: 1)
+                    }
+            }
+
+            HStack(spacing: 12) {
+                Spacer()
+
+                Button("取消") {
+                    dismiss()
+                }
+                .keyboardShortcut(.cancelAction)
+
+                Button("创建任务") {
+                    onCreate(title, description)
+                    dismiss()
+                }
+                .keyboardShortcut(.defaultAction)
+                .buttonStyle(.borderedProminent)
+                .disabled(!canCreate)
+            }
+        }
+        .padding(28)
+        .frame(width: 460)
+        .onAppear {
+            isTitleFocused = true
+        }
+    }
+}
+
 private struct ImagePreviewView: View {
     let task: TaskItem
     @Environment(\.dismiss) private var dismiss
@@ -866,7 +1054,7 @@ private struct ImagePreviewView: View {
             }
             .padding(14)
 
-            if let image = NSImage(data: task.imageData) {
+            if let data = task.imageData, let image = NSImage(data: data) {
                 ScrollView([.horizontal, .vertical]) {
                     Image(nsImage: image)
                         .resizable()

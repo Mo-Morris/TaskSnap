@@ -42,6 +42,22 @@ import Testing
 }
 
 @MainActor
+@Test func taskStoreAddsManualTasksWithoutVisionConfiguration() {
+    let urls = temporaryStoreURLs()
+    let store = TaskStore(storeURL: urls.tasks, configurationURL: urls.configuration)
+
+    let didAdd = store.addManualTask(title: "整理周会待办", description: "记录本周要跟进的接口、发布和验收事项")
+
+    #expect(didAdd == true)
+    #expect(store.tasks.count == 1)
+    #expect(store.tasks[0].title == "整理周会待办")
+    #expect(store.tasks[0].description == "记录本周要跟进的接口、发布和验收事项")
+    #expect(store.tasks[0].inputSource == .manual)
+    #expect(store.tasks[0].imageData == nil)
+    #expect(TaskItem.manualIconNames.contains(store.tasks[0].manualIconName ?? ""))
+}
+
+@MainActor
 @Test func savingVisionConfigurationValidatesBeforePersisting() async throws {
     let urls = temporaryStoreURLs()
     let summarizer = FakeVisionSummarizer(summary: "整理登录页文案")
@@ -93,7 +109,7 @@ import Testing
     let store = TaskStore(
         storeURL: urls.tasks,
         configurationURL: urls.configuration,
-        visionSummarizer: FakeVisionSummarizer(summaries: ["第三个任务", "第二个任务", "第一个任务"])
+        visionSummarizer: FakeVisionSummarizer(summary: "")
     )
 
     try await store.saveVisionConfiguration(VisionModelConfiguration(
