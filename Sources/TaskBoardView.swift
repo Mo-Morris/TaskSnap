@@ -14,7 +14,10 @@ struct TaskBoardView: View {
     @State private var draggingTaskID: TaskItem.ID?
     @State private var dragVerticalOffset: CGFloat = 0
     @State private var reorderTargetIndex: Int?
+    @State private var rowFrames: [TaskItem.ID: CGRect] = [:]
     @FocusState private var isPasteTargetFocused: Bool
+
+    private let taskListSpaceName = "taskListSpace"
 
     var body: some View {
         Group {
@@ -166,29 +169,38 @@ struct TaskBoardView: View {
 
     private var taskList: some View {
         ScrollView {
-            LazyVStack(spacing: 14) {
+            VStack(spacing: 14) {
                 ForEach(Array(store.tasks.enumerated()), id: \.element.id) { index, task in
-                    if reorderTargetIndex == index, draggingTaskID != nil {
-                        ReorderInsertionIndicator()
-                    }
-
                     TaskRow(
                         task: task,
-                        isSummarizing: store.summarizingTaskIDs.contains(task.id)
+                        isSummarizing: store.summarizingTaskIDs.contains(task.id),
+                        coordinateSpaceName: taskListSpaceName
                     ) {
                         store.toggle(task)
                     } onDelete: {
                         store.delete(task)
                     } onPreview: {
                         previewTask = task
-                    } onReorderChanged: { verticalOffset in
-                        updateReorderTarget(for: task, sourceIndex: index, verticalOffset: verticalOffset)
+                    } onReorderChanged: { translationHeight, locationY in
+                        updateReorderTarget(
+                            for: task,
+                            sourceIndex: index,
+                            locationY: locationY,
+                            translationHeight: translationHeight
+                        )
                     } onReorderEnded: {
                         finishReorder(for: task)
                     }
                     .offset(y: draggingTaskID == task.id ? dragVerticalOffset : 0)
-                    .scaleEffect(draggingTaskID == task.id ? 1.012 : 1)
                     .zIndex(draggingTaskID == task.id ? 10 : 0)
+                    .background(
+                        GeometryReader { proxy in
+                            Color.clear.preference(
+                                key: RowFramePreferenceKey.self,
+                                value: [task.id: proxy.frame(in: .named(taskListSpaceName))]
+                            )
+                        }
+                    )
                     .overlay(alignment: .topTrailing) {
                         if store.summarizingTaskIDs.contains(task.id) {
                             ProgressView()
@@ -199,26 +211,83 @@ struct TaskBoardView: View {
                         }
                     }
                 }
-
-                if reorderTargetIndex == store.tasks.count, draggingTaskID != nil {
-                    ReorderInsertionIndicator()
-                }
             }
             .padding(.horizontal, 28)
             .padding(.top, 10)
             .padding(.bottom, 18)
             .frame(maxWidth: .infinity)
+            .coordinateSpace(name: taskListSpaceName)
+            .overlay(alignment: .topLeading) {
+                insertionIndicatorOverlay
+            }
+            .onPreferenceChange(RowFramePreferenceKey.self) { newFrames in
+                rowFrames = newFrames
+            }
         }
         .frame(maxWidth: .infinity)
     }
 
-    private func updateReorderTarget(for task: TaskItem, sourceIndex: Int, verticalOffset: CGFloat) {
-        draggingTaskID = task.id
-        dragVerticalOffset = verticalOffset
+    @ViewBuilder
+    private var insertionIndicatorOverlay: some View {
+        if let targetIndex = reorderTargetIndex, draggingTaskID != nil {
+            ReorderInsertionIndicator()
+                .padding(.horizontal, 28)
+                .frame(maxWidth: .infinity)
+                .offset(y: insertionLineY(for: targetIndex) - 4)
+                .transition(.opacity)
+                .allowsHitTesting(false)
+        }
+    }
 
-        let rowStep: CGFloat = 146
-        let rawIndex = CGFloat(sourceIndex) + (verticalOffset / rowStep).rounded()
-        reorderTargetIndex = min(max(Int(rawIndex), 0), store.tasks.count)
+    private func insertionLineY(for index: Int) -> CGFloat {
+        let tasks = store.tasks
+        guard !tasks.isEmpty else { return 10 }
+
+        if index <= 0 {
+            guard let frame = rowFrames[tasks[0].id] else { return 10 }
+            return frame.minY - 7
+        }
+
+        if index >= tasks.count {
+            guard let frame = rowFrames[tasks[tasks.count - 1].id] else { return 10 }
+            return frame.maxY + 7
+        }
+
+        if let prev = rowFrames[tasks[index - 1].id],
+           let next = rowFrames[tasks[index].id] {
+            return (prev.maxY + next.minY) / 2
+        }
+
+        return 10
+    }
+
+    private func updateReorderTarget(
+        for task: TaskItem,
+        sourceIndex: Int,
+        locationY: CGFloat,
+        translationHeight: CGFloat
+    ) {
+        if draggingTaskID != task.id {
+            draggingTaskID = task.id
+        }
+        dragVerticalOffset = translationHeight
+
+        let count = store.tasks.count
+        var bestIndex = sourceIndex
+        var bestDistance = CGFloat.infinity
+        for candidate in 0...count {
+            let distance = abs(insertionLineY(for: candidate) - locationY)
+            if distance < bestDistance {
+                bestDistance = distance
+                bestIndex = candidate
+            }
+        }
+
+        if reorderTargetIndex != bestIndex {
+            withAnimation(.interactiveSpring(response: 0.22, dampingFraction: 0.86)) {
+                reorderTargetIndex = bestIndex
+            }
+        }
     }
 
     private func finishReorder(for task: TaskItem) {
@@ -485,10 +554,11 @@ private enum InputAlert {
 private struct TaskRow: View {
     let task: TaskItem
     let isSummarizing: Bool
+    let coordinateSpaceName: String
     let onToggle: () -> Void
     let onDelete: () -> Void
     let onPreview: () -> Void
-    let onReorderChanged: (CGFloat) -> Void
+    let onReorderChanged: (CGFloat, CGFloat) -> Void
     let onReorderEnded: () -> Void
 
     @State private var horizontalOffset: CGFloat = 0
@@ -624,15 +694,19 @@ private struct TaskRow: View {
             cardContent
                 .offset(x: horizontalOffset)
                 .shadow(
-                    color: Color.black.opacity(dragMode == nil ? (task.isDone ? 0.025 : 0.07) : 0.14),
-                    radius: dragMode == nil ? 8 : 16,
-                    y: dragMode == nil ? 3 : 8
+                    color: Color.black.opacity(dragMode == .vertical ? 0.12 : (task.isDone ? 0.025 : 0.07)),
+                    radius: dragMode == .vertical ? 12 : 8,
+                    y: dragMode == .vertical ? 5 : 3
                 )
+                .animation(.easeOut(duration: 0.18), value: dragMode)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
         .gesture(rowDragGesture)
-        .onHover { isHovering = $0 }
+        .onHover { hovering in
+            guard dragMode == nil else { return }
+            isHovering = hovering
+        }
         .contextMenu {
             Button(action: onToggle) {
                 Label(task.isDone ? "标记为未完成" : "完成任务", systemImage: "checkmark.circle")
@@ -709,19 +783,25 @@ private struct TaskRow: View {
     }
 
     private var rowDragGesture: some Gesture {
-        DragGesture(minimumDistance: 7)
+        DragGesture(minimumDistance: 10, coordinateSpace: .named(coordinateSpaceName))
             .onChanged { value in
                 if dragMode == nil {
+                    if hypot(value.translation.width, value.translation.height) < 12 {
+                        return
+                    }
                     let isHorizontal = abs(value.translation.width) > abs(value.translation.height)
                     dragMode = isHorizontal ? .horizontal : .vertical
+                    if dragMode == .vertical {
+                        horizontalOffset = 0
+                        isHovering = false
+                    }
                 }
 
                 switch dragMode {
                 case .horizontal:
                     horizontalOffset = min(max(value.translation.width, -92), 92)
                 case .vertical:
-                    horizontalOffset = 0
-                    onReorderChanged(value.translation.height)
+                    onReorderChanged(value.translation.height, value.location.y)
                 case nil:
                     break
                 }
@@ -1321,6 +1401,14 @@ private enum SettingsPalette {
     static let primaryText = Color(nsColor: .labelColor)
     static let secondaryText = Color(nsColor: .secondaryLabelColor)
     static let accent = Color(nsColor: .secondaryLabelColor)
+}
+
+private struct RowFramePreferenceKey: PreferenceKey {
+    static let defaultValue: [TaskItem.ID: CGRect] = [:]
+
+    static func reduce(value: inout [TaskItem.ID: CGRect], nextValue: () -> [TaskItem.ID: CGRect]) {
+        value.merge(nextValue()) { _, new in new }
+    }
 }
 
 private extension Color {
