@@ -130,7 +130,7 @@ struct TaskBoardView: View {
             .help("新建手动任务")
             .accessibilityLabel("新建手动任务")
         }
-        .frame(height: 40)
+        .frame(height: 30)
         .padding(.horizontal, 28)
         .background(Color(nsColor: .windowBackgroundColor))
         .overlay(alignment: .bottom) {
@@ -193,7 +193,7 @@ struct TaskBoardView: View {
                         if store.summarizingTaskIDs.contains(task.id) {
                             ProgressView()
                                 .controlSize(.small)
-                                .padding(.top, 48)
+                                .padding(.top, 22)
                                 .padding(.trailing, 22)
                                 .allowsHitTesting(false)
                         }
@@ -622,12 +622,12 @@ private struct TaskRow: View {
     }
 
     private var cardContent: some View {
-        HStack(alignment: .center, spacing: 26) {
+        HStack(alignment: .center, spacing: 14) {
             leadingVisual
 
-            VStack(alignment: .leading, spacing: 22) {
+            VStack(alignment: .leading, spacing: 7) {
                 Text(displayTitle)
-                    .font(.system(size: 29, weight: .bold))
+                    .font(.headline.weight(.semibold))
                     .foregroundStyle(task.isDone ? .secondary : .primary)
                     .strikethrough(task.isDone)
                     .lineLimit(2)
@@ -635,20 +635,22 @@ private struct TaskRow: View {
                     .multilineTextAlignment(.leading)
 
                 Text(displayDescription)
-                    .font(.system(size: 19, weight: .regular))
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .minimumScaleFactor(0.75)
+
+                SourceBadge(source: task.inputSource)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
             DragGrip()
                 .opacity(dragMode == .vertical || isHovering ? 0.62 : 0)
         }
-        .padding(.leading, 24)
-        .padding(.trailing, 24)
-        .padding(.vertical, 16)
-        .frame(minHeight: 132)
+        .padding(.leading, 18)
+        .padding(.trailing, 18)
+        .padding(.vertical, 12)
+        .frame(minHeight: 70)
         .background {
             RoundedRectangle(cornerRadius: 13, style: .continuous)
                 .fill(cardColor.opacity(task.isDone ? 0.18 : 0.34))
@@ -657,11 +659,6 @@ private struct TaskRow: View {
             RoundedRectangle(cornerRadius: 13, style: .continuous)
                 .stroke(cardColor.opacity(0.72), lineWidth: 1.2)
                 .allowsHitTesting(false)
-        }
-        .overlay(alignment: .topTrailing) {
-            SourceBadge(source: task.inputSource)
-                .padding(.top, 16)
-                .padding(.trailing, 18)
         }
         .opacity(task.isDone ? 0.68 : 1)
     }
@@ -742,7 +739,7 @@ private struct TaskRow: View {
                 manualIconTile
             }
         }
-        .frame(width: 104, height: 96)
+        .frame(width: 36, height: 36)
     }
 
     @ViewBuilder
@@ -753,19 +750,19 @@ private struct TaskRow: View {
                     Image(nsImage: image)
                         .resizable()
                         .scaledToFill()
-                        .frame(width: 104, height: 96)
+                        .frame(width: 36, height: 36)
                         .clipped()
                         .opacity(task.isDone ? 0.5 : 1)
 
                     Image(systemName: "arrow.up.left.and.arrow.down.right")
-                        .font(.system(size: 12, weight: .semibold))
+                        .font(.system(size: 8, weight: .semibold))
                         .foregroundStyle(.white)
-                        .frame(width: 24, height: 24)
+                        .frame(width: 12, height: 12)
                         .background(Color.black.opacity(0.38))
                         .clipShape(Circle())
-                        .padding(7)
+                        .padding(4)
                 }
-                .frame(width: 104, height: 96)
+                .frame(width: 36, height: 36)
                 .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                 .overlay {
                     RoundedRectangle(cornerRadius: 8, style: .continuous)
@@ -780,10 +777,10 @@ private struct TaskRow: View {
         } else {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(Color.white.opacity(0.72))
-                .frame(width: 104, height: 96)
+                .frame(width: 36, height: 36)
                 .overlay {
-                    Text("图片缩略图")
-                        .font(.system(size: 12))
+                    Image(systemName: "photo")
+                        .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(.secondary)
                 }
                 .overlay {
@@ -796,10 +793,10 @@ private struct TaskRow: View {
     private var manualIconTile: some View {
         RoundedRectangle(cornerRadius: 18, style: .continuous)
             .fill(Color.white.opacity(0.76))
-            .frame(width: 78, height: 78)
+            .frame(width: 36, height: 36)
             .overlay {
                 Image(systemName: task.manualIconName ?? TaskItem.randomManualIconName())
-                    .font(.system(size: 28, weight: .semibold))
+                    .font(.system(size: 15, weight: .semibold))
                     .symbolRenderingMode(.hierarchical)
                     .foregroundStyle(cardColor.opacity(0.95))
             }
@@ -816,16 +813,8 @@ private struct SourceBadge: View {
 
     var body: some View {
         Text(source.label)
-            .font(.system(size: 12, weight: .semibold))
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 5)
-            .background(Color.white.opacity(0.62))
-            .clipShape(Capsule())
-            .overlay {
-                Capsule()
-                    .stroke(Color.black.opacity(0.06), lineWidth: 1)
-            }
+            .font(.system(size: 11, weight: .medium))
+            .foregroundStyle(.tertiary)
     }
 }
 
