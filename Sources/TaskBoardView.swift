@@ -9,6 +9,7 @@ struct TaskBoardView: View {
     @Environment(\.openSettings) private var openSettings
     @State private var isDropTargeted = false
     @State private var previewTask: TaskItem?
+    @State private var editingTask: TaskItem?
     @State private var inputAlert: InputAlert?
     @State private var isShowingManualTaskForm = false
     @State private var draggingTaskID: TaskItem.ID?
@@ -68,6 +69,11 @@ struct TaskBoardView: View {
         }
         .sheet(item: $previewTask) { task in
             ImagePreviewView(task: task)
+        }
+        .sheet(item: $editingTask) { task in
+            TaskEditFormView(task: task) { title, description in
+                store.updateTask(task, title: title, description: description)
+            }
         }
         .sheet(isPresented: $isShowingManualTaskForm) {
             ManualTaskFormView { title, description in
@@ -181,6 +187,8 @@ struct TaskBoardView: View {
                         store.delete(task)
                     } onPreview: {
                         previewTask = task
+                    } onEdit: {
+                        editingTask = task
                     } onReorderChanged: { translationHeight, locationY in
                         updateReorderTarget(
                             for: task,
@@ -551,6 +559,98 @@ private enum InputAlert {
     }
 }
 
+private struct TaskDisplayText {
+    let title: String
+    let description: String
+
+    init(task: TaskItem) {
+        if let description = task.description?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !description.isEmpty {
+            let normalizedTitle = task.title.trimmingCharacters(in: .whitespacesAndNewlines)
+            self.title = normalizedTitle.isEmpty ? "未命名截图任务" : normalizedTitle
+            self.description = description
+            return
+        }
+
+        let parsed = Self.parseTitleAndDescription(from: task.title)
+        title = parsed.title
+        description = parsed.description
+    }
+
+    private static func parseTitleAndDescription(from text: String) -> (title: String, description: String) {
+        let normalized = text.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !normalized.isEmpty else {
+            return ("未命名截图任务", "等待视觉模型补全截图里的任务线索。")
+        }
+
+        if let structured = structuredTitleAndDescription(from: normalized) {
+            return structured
+        }
+
+        let compact = normalized
+            .replacingOccurrences(of: "\n", with: " ")
+            .replacingOccurrences(of: "  ", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        let separators = CharacterSet(charactersIn: "。！？!?；;，,")
+        if let separatorRange = compact.rangeOfCharacter(from: separators) {
+            let title = String(compact[..<separatorRange.lowerBound])
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let descriptionStart = compact.index(after: separatorRange.lowerBound)
+            let description = String(compact[descriptionStart...])
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+
+            if !title.isEmpty, !description.isEmpty {
+                return (title, description)
+            }
+        }
+
+        if compact.count > 18 {
+            let splitIndex = compact.index(compact.startIndex, offsetBy: 18)
+            let title = String(compact[..<splitIndex])
+            let description = String(compact[splitIndex...])
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return (title, description.isEmpty ? "查看截图，快速回到这项任务的上下文。" : description)
+        }
+
+        return (compact, "查看截图，快速回到这项任务的上下文。")
+    }
+
+    private static func structuredTitleAndDescription(from text: String) -> (title: String, description: String)? {
+        let lines = text
+            .components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        var title: String?
+        var description: String?
+
+        for line in lines {
+            if let value = value(afterAnyPrefix: ["主标题：", "主标题:", "标题：", "标题:"], in: line) {
+                title = value
+            } else if let value = value(afterAnyPrefix: ["副标题：", "副标题:", "背景：", "背景:"], in: line) {
+                description = value
+            }
+        }
+
+        guard let title, !title.isEmpty else {
+            return nil
+        }
+
+        return (title, description?.isEmpty == false ? description! : "查看截图，快速回到这项任务的上下文。")
+    }
+
+    private static func value(afterAnyPrefix prefixes: [String], in line: String) -> String? {
+        for prefix in prefixes where line.hasPrefix(prefix) {
+            return String(line.dropFirst(prefix.count))
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        return nil
+    }
+}
+
 private struct TaskRow: View {
     let task: TaskItem
     let isSummarizing: Bool
@@ -558,6 +658,7 @@ private struct TaskRow: View {
     let onToggle: () -> Void
     let onDelete: () -> Void
     let onPreview: () -> Void
+    let onEdit: () -> Void
     let onReorderChanged: (CGFloat, CGFloat) -> Void
     let onReorderEnded: () -> Void
 
@@ -601,90 +702,11 @@ private struct TaskRow: View {
             return "AI 生成中..."
         }
 
-        return splitTitleAndDescription.title
+        return TaskDisplayText(task: task).title
     }
 
     private var displayDescription: String {
-        if let description = task.description?.trimmingCharacters(in: .whitespacesAndNewlines),
-           !description.isEmpty {
-            return description
-        }
-
-        return splitTitleAndDescription.description
-    }
-
-    private var splitTitleAndDescription: (title: String, description: String) {
-        let normalized = task.title
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-
-        guard !normalized.isEmpty else {
-            return ("未命名截图任务", "等待视觉模型补全截图里的任务线索。")
-        }
-
-        if let structured = structuredTitleAndDescription(from: normalized) {
-            return structured
-        }
-
-        let compact = normalized
-            .replacingOccurrences(of: "\n", with: " ")
-            .replacingOccurrences(of: "  ", with: " ")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-
-        let separators = CharacterSet(charactersIn: "。！？!?；;，,")
-        if let separatorRange = compact.rangeOfCharacter(from: separators) {
-            let title = String(compact[..<separatorRange.lowerBound])
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            let descriptionStart = compact.index(after: separatorRange.lowerBound)
-            let description = String(compact[descriptionStart...])
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-
-            if !title.isEmpty, !description.isEmpty {
-                return (title, description)
-            }
-        }
-
-        if compact.count > 18 {
-            let splitIndex = compact.index(compact.startIndex, offsetBy: 18)
-            let title = String(compact[..<splitIndex])
-            let description = String(compact[splitIndex...])
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            return (title, description.isEmpty ? "查看截图，快速回到这项任务的上下文。" : description)
-        }
-
-        return (compact, "查看截图，快速回到这项任务的上下文。")
-    }
-
-    private func structuredTitleAndDescription(from text: String) -> (title: String, description: String)? {
-        let lines = text
-            .components(separatedBy: .newlines)
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-
-        var title: String?
-        var description: String?
-
-        for line in lines {
-            if let value = value(afterAnyPrefix: ["主标题：", "主标题:", "标题：", "标题:"], in: line) {
-                title = value
-            } else if let value = value(afterAnyPrefix: ["副标题：", "副标题:", "背景：", "背景:"], in: line) {
-                description = value
-            }
-        }
-
-        guard let title, !title.isEmpty else {
-            return nil
-        }
-
-        return (title, description?.isEmpty == false ? description! : "查看截图，快速回到这项任务的上下文。")
-    }
-
-    private func value(afterAnyPrefix prefixes: [String], in line: String) -> String? {
-        for prefix in prefixes where line.hasPrefix(prefix) {
-            return String(line.dropFirst(prefix.count))
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-
-        return nil
+        TaskDisplayText(task: task).description
     }
 
     var body: some View {
@@ -741,6 +763,11 @@ private struct TaskRow: View {
                 SourceBadge(source: task.inputSource)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                guard dragMode == nil else { return }
+                onEdit()
+            }
 
             DragGrip()
                 .opacity(dragMode == .vertical || isHovering ? 0.62 : 0)
@@ -1112,6 +1139,101 @@ private struct ManualTaskFormView: View {
                 .keyboardShortcut(.defaultAction)
                 .buttonStyle(.borderedProminent)
                 .disabled(!canCreate)
+            }
+        }
+        .padding(28)
+        .frame(width: 460)
+        .onAppear {
+            isTitleFocused = true
+        }
+    }
+}
+
+private struct TaskEditFormView: View {
+    let task: TaskItem
+    let onSave: (String, String) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var title: String
+    @State private var description: String
+    @FocusState private var isTitleFocused: Bool
+
+    init(task: TaskItem, onSave: @escaping (String, String) -> Void) {
+        self.task = task
+        self.onSave = onSave
+
+        let displayText = TaskDisplayText(task: task)
+        _title = State(initialValue: displayText.title)
+        _description = State(initialValue: displayText.description)
+    }
+
+    private var canSave: Bool {
+        !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 22) {
+            HStack {
+                Text("编辑任务")
+                    .font(.system(size: 24, weight: .bold))
+
+                Spacer()
+
+                Button {
+                    dismiss()
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.title2)
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("关闭")
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("任务名称")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.secondary)
+
+                TextField("例如：明天确认上线计划", text: $title)
+                    .textFieldStyle(.roundedBorder)
+                    .focused($isTitleFocused)
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("任务描述")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.secondary)
+
+                TextEditor(text: $description)
+                    .font(.system(size: 14))
+                    .scrollContentBackground(.hidden)
+                    .padding(8)
+                    .frame(height: 118)
+                    .background(Color(nsColor: .textBackgroundColor))
+                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .stroke(Color.black.opacity(0.12), lineWidth: 1)
+                    }
+            }
+
+            HStack(spacing: 12) {
+                Spacer()
+
+                Button("取消") {
+                    dismiss()
+                }
+                .keyboardShortcut(.cancelAction)
+
+                Button("保存修改") {
+                    onSave(title, description)
+                    dismiss()
+                }
+                .keyboardShortcut(.defaultAction)
+                .buttonStyle(.borderedProminent)
+                .disabled(!canSave)
             }
         }
         .padding(28)

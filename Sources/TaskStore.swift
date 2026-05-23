@@ -137,6 +137,24 @@ final class TaskStore: ObservableObject {
         tasks.insert(task, at: insertionIndex)
     }
 
+    @discardableResult
+    func updateTask(_ task: TaskItem, title: String, description: String) -> Bool {
+        guard let index = tasks.firstIndex(where: { $0.id == task.id }) else {
+            return false
+        }
+
+        let normalizedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedDescription = description.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !normalizedTitle.isEmpty, !normalizedDescription.isEmpty else {
+            return false
+        }
+
+        tasks[index].title = normalizedTitle
+        tasks[index].description = normalizedDescription
+        return true
+    }
+
     func clearCompleted() {
         tasks.removeAll { $0.isDone }
     }

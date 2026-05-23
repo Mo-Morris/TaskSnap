@@ -58,6 +58,75 @@ import Testing
 }
 
 @MainActor
+@Test func taskStoreUpdatesTaskTitleAndDescription() {
+    let urls = temporaryStoreURLs()
+    let store = TaskStore(storeURL: urls.tasks, configurationURL: urls.configuration)
+
+    _ = store.addManualTask(title: "整理周会待办", description: "记录本周要跟进的接口、发布和验收事项")
+
+    let didUpdate = store.updateTask(
+        store.tasks[0],
+        title: " 确认上线计划 ",
+        description: " 和产品确认发布时间、灰度范围和回滚预案 "
+    )
+
+    #expect(didUpdate == true)
+    #expect(store.tasks[0].title == "确认上线计划")
+    #expect(store.tasks[0].description == "和产品确认发布时间、灰度范围和回滚预案")
+}
+
+@MainActor
+@Test func taskStoreRejectsTaskUpdateWithEmptyTitle() {
+    let urls = temporaryStoreURLs()
+    let store = TaskStore(storeURL: urls.tasks, configurationURL: urls.configuration)
+
+    _ = store.addManualTask(title: "整理周会待办", description: "记录本周要跟进的接口、发布和验收事项")
+    let originalTask = store.tasks[0]
+
+    let didUpdate = store.updateTask(
+        originalTask,
+        title: "   ",
+        description: "和产品确认发布时间、灰度范围和回滚预案"
+    )
+
+    #expect(didUpdate == false)
+    #expect(store.tasks[0] == originalTask)
+}
+
+@MainActor
+@Test func taskStoreRejectsTaskUpdateWithEmptyDescription() {
+    let urls = temporaryStoreURLs()
+    let store = TaskStore(storeURL: urls.tasks, configurationURL: urls.configuration)
+
+    _ = store.addManualTask(title: "整理周会待办", description: "记录本周要跟进的接口、发布和验收事项")
+    let originalTask = store.tasks[0]
+
+    let didUpdate = store.updateTask(
+        originalTask,
+        title: "确认上线计划",
+        description: "\n\t "
+    )
+
+    #expect(didUpdate == false)
+    #expect(store.tasks[0] == originalTask)
+}
+
+@MainActor
+@Test func taskStoreRejectsTaskUpdateForMissingTask() {
+    let urls = temporaryStoreURLs()
+    let store = TaskStore(storeURL: urls.tasks, configurationURL: urls.configuration)
+
+    let didUpdate = store.updateTask(
+        TaskItem(title: "不存在的任务", description: "不会写入列表"),
+        title: "确认上线计划",
+        description: "和产品确认发布时间、灰度范围和回滚预案"
+    )
+
+    #expect(didUpdate == false)
+    #expect(store.tasks.isEmpty)
+}
+
+@MainActor
 @Test func savingVisionConfigurationValidatesBeforePersisting() async throws {
     let urls = temporaryStoreURLs()
     let summarizer = FakeVisionSummarizer(summary: "整理登录页文案")
