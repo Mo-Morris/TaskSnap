@@ -47,6 +47,10 @@ cat > "${APP_DIR}/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
+SIGN_IDENTITY="${TASKSNAP_SIGN_IDENTITY:--}"
+codesign --force --deep --sign "$SIGN_IDENTITY" "$APP_DIR"
+codesign --verify --deep --strict --verbose=2 "$APP_DIR"
+
 ln -s /Applications "${STAGING_DIR}/Applications"
 hdiutil create -volname "TaskSnap ${VERSION}" -srcfolder "$STAGING_DIR" -ov -format UDZO "$DMG_PATH"
 
