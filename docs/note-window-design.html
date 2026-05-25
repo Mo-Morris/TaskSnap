@@ -1,0 +1,474 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TaskSnap 任务笔记窗口设计稿</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #ecebea;
+      --ink: #202124;
+      --muted: #6d7076;
+      --line: rgba(20, 22, 26, 0.12);
+      --panel: #f8f8f7;
+      --panel-2: #ffffff;
+      --dark: #20201f;
+      --dark-2: #2b2b2a;
+      --green: #5e8f72;
+      --blue: #4c6f9b;
+      --rose: #d77868;
+      --amber: #b88731;
+      --shadow: 0 26px 70px rgba(24, 26, 30, 0.18);
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background:
+        linear-gradient(145deg, rgba(255,255,255,0.78), rgba(232,232,229,0.88)),
+        var(--bg);
+      color: var(--ink);
+    }
+
+    .page {
+      width: min(1440px, calc(100vw - 48px));
+      margin: 0 auto;
+      padding: 34px 0 42px;
+    }
+
+    .header {
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      gap: 24px;
+      margin-bottom: 22px;
+    }
+
+    .header h1 {
+      margin: 0 0 8px;
+      font-size: 28px;
+      line-height: 1.15;
+      letter-spacing: 0;
+    }
+
+    .header p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.6;
+      max-width: 760px;
+    }
+
+    .legend {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      color: var(--muted);
+      font-size: 12px;
+      white-space: nowrap;
+    }
+
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--green);
+      box-shadow: 14px 0 0 var(--blue), 28px 0 0 var(--rose);
+      margin-right: 28px;
+    }
+
+    .canvas {
+      display: block;
+    }
+
+    .mac-window {
+      overflow: hidden;
+      border: 1px solid rgba(26, 27, 30, 0.16);
+      border-radius: 14px;
+      background: var(--panel);
+      box-shadow: var(--shadow);
+    }
+
+    .traffic {
+      display: flex;
+      gap: 7px;
+      align-items: center;
+      height: 30px;
+      padding: 0 14px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(248, 248, 247, 0.92);
+    }
+
+    .traffic span {
+      width: 11px;
+      height: 11px;
+      border-radius: 50%;
+    }
+
+    .traffic span:nth-child(1) { background: #ff5f57; }
+    .traffic span:nth-child(2) { background: #ffbd2e; }
+    .traffic span:nth-child(3) { background: #28c840; }
+
+    .note-window {
+      min-height: 742px;
+      display: grid;
+      grid-template-rows: 30px 1fr;
+    }
+
+    .note-body {
+      display: grid;
+      grid-template-columns: 292px minmax(0, 1fr);
+      min-height: 0;
+    }
+
+    .task-sidebar {
+      border-right: 1px solid var(--line);
+      background: #f7f6f3;
+      padding: 18px;
+    }
+
+    .task-sidebar h3,
+    .preview h3,
+    .editor h3 {
+      margin: 0 0 10px;
+      color: #2a2c31;
+      font-size: 13px;
+      letter-spacing: 0;
+    }
+
+    .sidebar-note {
+      margin: 0 0 14px;
+      color: #70747b;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
+    .title-list {
+      display: grid;
+      gap: 10px;
+    }
+
+    .title-item {
+      display: grid;
+      gap: 6px;
+      width: 100%;
+      min-height: 72px;
+      padding: 13px 14px;
+      border: 1px solid rgba(30, 32, 36, 0.08);
+      border-radius: 8px;
+      background: rgba(255,255,255,0.64);
+      color: #303238;
+      text-align: left;
+    }
+
+    .title-item.active {
+      border-color: rgba(76, 111, 155, 0.36);
+      background: #fff4ed;
+      box-shadow: inset 3px 0 0 rgba(76, 111, 155, 0.72);
+    }
+
+    .title-item strong {
+      display: block;
+      overflow: hidden;
+      font-size: 13px;
+      line-height: 1.35;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .title-item span {
+      color: #777b83;
+      font-size: 11px;
+    }
+
+    .document-pane {
+      display: grid;
+      grid-template-rows: 58px 1fr;
+      min-height: 0;
+      background: #fbfbfa;
+    }
+
+    .document-titlebar {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto auto;
+      gap: 16px;
+      align-items: center;
+      padding: 0 18px 0 clamp(24px, 4vw, 54px);
+      border-bottom: 1px solid var(--line);
+      background: #f7f6f3;
+    }
+
+    .title-group {
+      min-width: 0;
+    }
+
+    .title-group strong {
+      display: block;
+      overflow: hidden;
+      color: #222326;
+      font-size: 15px;
+      line-height: 1.25;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .title-group span {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .segmented {
+      display: inline-flex;
+      overflow: hidden;
+      padding: 3px;
+      border-radius: 6px;
+      background: var(--dark);
+      box-shadow: inset 0 0 0 1px rgba(255,255,255,0.04);
+    }
+
+    .segmented button {
+      min-width: 78px;
+      height: 25px;
+      border: 0;
+      border-radius: 4px;
+      background: transparent;
+      color: rgba(255,255,255,0.66);
+      font: inherit;
+      font-size: 12px;
+      font-weight: 650;
+    }
+
+    .segmented .selected {
+      background: #4a4a48;
+      color: #fff;
+    }
+
+    .toolbar-actions {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .tool {
+      display: grid;
+      place-items: center;
+      width: 30px;
+      height: 30px;
+      border: 1px solid rgba(0,0,0,0.1);
+      border-radius: 7px;
+      background: rgba(255,255,255,0.78);
+      color: #3f4248;
+      font-size: 15px;
+    }
+
+    .workspace {
+      min-width: 0;
+      background: #fbfbfa;
+      padding: 28px clamp(24px, 4vw, 54px);
+    }
+
+    .preview {
+      max-width: 840px;
+      margin: 0 auto;
+      color: #25272b;
+    }
+
+    .preview h2 {
+      margin: 0 0 15px;
+      font-size: 26px;
+      line-height: 1.25;
+      letter-spacing: 0;
+    }
+
+    .preview p {
+      margin: 0 0 16px;
+      color: #4d5159;
+      font-size: 15px;
+      line-height: 1.72;
+    }
+
+    .preview ul {
+      display: grid;
+      gap: 10px;
+      margin: 0 0 22px;
+      padding-left: 20px;
+      color: #3e4249;
+      font-size: 15px;
+      line-height: 1.58;
+    }
+
+    .callout {
+      margin: 24px 0;
+      padding: 15px 16px;
+      border-left: 4px solid var(--green);
+      border-radius: 7px;
+      background: #eef5ee;
+      color: #39483c;
+      font-size: 14px;
+      line-height: 1.58;
+    }
+
+    .code {
+      overflow: hidden;
+      margin-top: 22px;
+      border: 1px solid rgba(0,0,0,0.11);
+      border-radius: 8px;
+      background: #242629;
+      color: #e9edf0;
+      font-family: "SF Mono", ui-monospace, Menlo, monospace;
+      font-size: 12px;
+    }
+
+    .code div {
+      padding: 12px 14px;
+      border-bottom: 1px solid rgba(255,255,255,0.08);
+      color: #b9c2ce;
+    }
+
+    .code pre {
+      margin: 0;
+      padding: 15px 14px 17px;
+      white-space: pre-wrap;
+      line-height: 1.6;
+    }
+
+    .caption {
+      margin-top: 18px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.6;
+    }
+
+    @media (max-width: 1040px) {
+      .note-body {
+        grid-template-columns: 1fr;
+      }
+
+      .task-sidebar {
+        border-right: 0;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .document-titlebar {
+        padding-left: 18px;
+      }
+    }
+
+    @media (max-width: 720px) {
+      .page {
+        width: min(100vw - 24px, 1440px);
+        padding-top: 18px;
+      }
+
+      .header {
+        display: block;
+      }
+
+      .legend {
+        margin-top: 12px;
+      }
+
+      .document-titlebar {
+        grid-template-columns: 1fr;
+        height: auto;
+        padding: 12px;
+      }
+
+      .segmented {
+        width: 100%;
+      }
+
+      .segmented button {
+        flex: 1;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header class="header">
+      <div>
+        <h1>TaskSnap 任务笔记窗口设计稿</h1>
+        <p>任务列表点击“查看/添加笔记”后弹出此窗口。左侧只负责切换任务标题，右侧专注阅读或编辑当前任务的 Markdown 笔记。</p>
+      </div>
+      <div class="legend"><span class="dot"></span>弹窗 / 标题列表 / 笔记文档</div>
+    </header>
+
+    <section class="canvas" aria-label="TaskSnap note design canvas">
+      <section class="mac-window note-window" aria-label="任务笔记详情窗口">
+        <div class="traffic"><span></span><span></span><span></span></div>
+
+        <div class="note-body">
+          <aside class="task-sidebar">
+            <h3>任务标题</h3>
+            <p class="sidebar-note">从任务列表点击查看或添加笔记后进入这里；左侧只显示标题，用来快速切换当前任务。</p>
+            <div class="title-list">
+              <button class="title-item active">
+                <strong>确认上线计划与回滚预案</strong>
+                <span>已关联笔记 · 进行中</span>
+              </button>
+              <button class="title-item">
+                <strong>整理周会跟进事项</strong>
+                <span>空笔记 · 手动输入</span>
+              </button>
+              <button class="title-item">
+                <strong>检查结算页异常</strong>
+                <span>已关联笔记 · 截图输入</span>
+              </button>
+              <button class="title-item">
+                <strong>补充接口验收记录</strong>
+                <span>已完成 · 可继续编辑</span>
+              </button>
+            </div>
+          </aside>
+
+          <section class="document-pane">
+            <header class="document-titlebar">
+              <div class="title-group">
+                <strong>上线前确认清单</strong>
+                <span>确认上线计划与回滚预案 · 自动保存 · 今天 16:42 更新</span>
+              </div>
+              <div class="segmented" role="tablist" aria-label="Markdown preview switch">
+                <button>Preview</button>
+                <button class="selected">Markdown</button>
+              </div>
+              <div class="toolbar-actions">
+                <span class="tool">✓</span>
+                <span class="tool">✎</span>
+                <span class="tool">×</span>
+              </div>
+            </header>
+
+            <section class="workspace">
+              <article class="preview">
+                <p>这篇笔记跟随任务保存，适合放“为什么要做、当前卡在哪里、下一步怎么接上”的内容。长笔记在新窗口里阅读，不挤占任务列表空间。</p>
+                <ul>
+                  <li>确认发布时间：本周四 20:00 是否仍可用。</li>
+                  <li>灰度范围：先开 10%，观察支付成功率和错误日志。</li>
+                  <li>回滚条件：接口错误率连续 5 分钟高于阈值。</li>
+                </ul>
+                <div class="callout">Preview 模式用于阅读，Markdown 模式用于编辑；切换不会打断窗口大小和滚动位置。</div>
+                <div class="code">
+                  <div>Markdown 原文片段</div>
+                  <pre>## 上线前确认清单
+- 确认发布时间
+- 灰度范围
+- 回滚条件</pre>
+                </div>
+              </article>
+            </section>
+          </section>
+        </div>
+      </section>
+    </section>
+
+    <p class="caption">实现时：任务列表中的“查看笔记/添加笔记”打开此弹窗；左侧只显示任务标题，右侧只显示当前任务的 Markdown 编辑与 Preview 阅读。</p>
+  </main>
+</body>
+</html>

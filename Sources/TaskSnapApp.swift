@@ -6,13 +6,15 @@ struct TaskSnapApp: App {
     @StateObject private var store = TaskStore()
     @StateObject private var pasteCommandDispatcher = PasteCommandDispatcher()
     @State private var isTaskBoardCollapsed = false
+    @State private var selectedNoteTaskID: TaskItem.ID?
 
     var body: some Scene {
         WindowGroup("TaskSnap") {
             TaskBoardView(
                 store: store,
                 pasteCommandDispatcher: pasteCommandDispatcher,
-                isCollapsed: $isTaskBoardCollapsed
+                isCollapsed: $isTaskBoardCollapsed,
+                selectedNoteTaskID: $selectedNoteTaskID
             )
             .frame(
                 minWidth: isTaskBoardCollapsed ? 72 : 320,
@@ -31,6 +33,17 @@ struct TaskSnapApp: App {
             }
         }
         .windowStyle(.hiddenTitleBar)
+
+        Window("任务笔记", id: "task-note") {
+            TaskNoteWindowView(store: store, selectedTaskID: $selectedNoteTaskID)
+                .frame(minWidth: 820, idealWidth: 1180, minHeight: 560, idealHeight: 760)
+                .background {
+                    NoteWindowConfigurator()
+                        .allowsHitTesting(false)
+                }
+        }
+        .windowStyle(.hiddenTitleBar)
+
         .commands {
             CommandGroup(replacing: .newItem) {
                 Button("清空已完成任务") {

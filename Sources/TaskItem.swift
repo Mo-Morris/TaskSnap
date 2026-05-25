@@ -10,6 +10,7 @@ struct TaskItem: Identifiable, Codable, Equatable {
     var backgroundColorHex: String
     var inputSource: TaskInputSource
     var manualIconName: String?
+    var noteMarkdown: String?
 
     init(
         id: UUID = UUID(),
@@ -20,7 +21,8 @@ struct TaskItem: Identifiable, Codable, Equatable {
         imageData: Data? = nil,
         backgroundColorHex: String = TaskItem.randomLightColorHex(),
         inputSource: TaskInputSource = .screenshot,
-        manualIconName: String? = nil
+        manualIconName: String? = nil,
+        noteMarkdown: String? = nil
     ) {
         self.id = id
         self.title = title
@@ -31,6 +33,7 @@ struct TaskItem: Identifiable, Codable, Equatable {
         self.backgroundColorHex = backgroundColorHex
         self.inputSource = inputSource
         self.manualIconName = manualIconName
+        self.noteMarkdown = noteMarkdown
     }
 
     init(from decoder: Decoder) throws {
@@ -47,6 +50,7 @@ struct TaskItem: Identifiable, Codable, Equatable {
             ?? (imageData == nil ? .manual : .screenshot)
         manualIconName = try container.decodeIfPresent(String.self, forKey: .manualIconName)
             ?? (inputSource == .manual ? TaskItem.randomManualIconName() : nil)
+        noteMarkdown = try container.decodeIfPresent(String.self, forKey: .noteMarkdown)
     }
 
     static func randomLightColorHex() -> String {

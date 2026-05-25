@@ -127,6 +127,57 @@ import Testing
 }
 
 @MainActor
+@Test func taskStoreUpdatesAndPersistsTaskNotes() {
+    let urls = temporaryStoreURLs()
+    let store = TaskStore(storeURL: urls.tasks, configurationURL: urls.configuration)
+
+    _ = store.addManualTask(title: "确认上线计划", description: "记录发布窗口和回滚预案")
+
+    let didUpdate = store.updateTaskNote(
+        store.tasks[0],
+        markdown: """
+        ## 上线前确认清单
+        - 确认发布时间
+        - 灰度范围
+        """
+    )
+
+    let reloadedStore = TaskStore(storeURL: urls.tasks, configurationURL: urls.configuration)
+
+    #expect(didUpdate == true)
+    #expect(store.tasks[0].noteMarkdown?.contains("上线前确认清单") == true)
+    #expect(reloadedStore.tasks[0].noteMarkdown == store.tasks[0].noteMarkdown)
+}
+
+@MainActor
+@Test func taskStoreAllowsClearingTaskNotes() {
+    let urls = temporaryStoreURLs()
+    let store = TaskStore(storeURL: urls.tasks, configurationURL: urls.configuration)
+
+    _ = store.addManualTask(title: "确认上线计划", description: "记录发布窗口和回滚预案")
+    _ = store.updateTaskNote(store.tasks[0], markdown: "## 上线前确认清单")
+
+    let didClear = store.updateTaskNote(store.tasks[0], markdown: "")
+
+    #expect(didClear == true)
+    #expect(store.tasks[0].noteMarkdown == "")
+}
+
+@MainActor
+@Test func taskStoreRejectsNoteUpdateForMissingTask() {
+    let urls = temporaryStoreURLs()
+    let store = TaskStore(storeURL: urls.tasks, configurationURL: urls.configuration)
+
+    let didUpdate = store.updateTaskNote(
+        TaskItem(title: "不存在的任务", description: "不会写入列表"),
+        markdown: "## 不会保存"
+    )
+
+    #expect(didUpdate == false)
+    #expect(store.tasks.isEmpty)
+}
+
+@MainActor
 @Test func savingVisionConfigurationValidatesBeforePersisting() async throws {
     let urls = temporaryStoreURLs()
     let summarizer = FakeVisionSummarizer(summary: "整理登录页文案")

@@ -6,10 +6,11 @@ struct TaskBoardView: View {
     @ObservedObject var store: TaskStore
     @ObservedObject var pasteCommandDispatcher: PasteCommandDispatcher
     @Binding var isCollapsed: Bool
+    @Binding var selectedNoteTaskID: TaskItem.ID?
     @Environment(\.openSettings) private var openSettings
+    @Environment(\.openWindow) private var openWindow
     @State private var isDropTargeted = false
     @State private var previewTask: TaskItem?
-    @State private var editingTask: TaskItem?
     @State private var inputAlert: InputAlert?
     @State private var isShowingManualTaskForm = false
     @State private var draggingTaskID: TaskItem.ID?
@@ -69,11 +70,6 @@ struct TaskBoardView: View {
         }
         .sheet(item: $previewTask) { task in
             ImagePreviewView(task: task)
-        }
-        .sheet(item: $editingTask) { task in
-            TaskEditFormView(task: task) { title, description in
-                store.updateTask(task, title: title, description: description)
-            }
         }
         .sheet(isPresented: $isShowingManualTaskForm) {
             ManualTaskFormView { title, description in
@@ -188,7 +184,8 @@ struct TaskBoardView: View {
                     } onPreview: {
                         previewTask = task
                     } onEdit: {
-                        editingTask = task
+                        selectedNoteTaskID = task.id
+                        openWindow(id: "task-note")
                     } onReorderChanged: { translationHeight, locationY in
                         updateReorderTarget(
                             for: task,
@@ -559,7 +556,7 @@ private enum InputAlert {
     }
 }
 
-private struct TaskDisplayText {
+struct TaskDisplayText {
     let title: String
     let description: String
 
@@ -1034,7 +1031,7 @@ private struct TaskRowIconButton: View {
     }
 }
 
-private struct PointingHandCursorModifier: ViewModifier {
+struct PointingHandCursorModifier: ViewModifier {
     @State private var isHovering = false
 
     func body(content: Content) -> some View {
@@ -1058,7 +1055,7 @@ private struct PointingHandCursorModifier: ViewModifier {
     }
 }
 
-private extension View {
+extension View {
     func pointingHandCursor() -> some View {
         modifier(PointingHandCursorModifier())
     }
@@ -1533,7 +1530,7 @@ private struct RowFramePreferenceKey: PreferenceKey {
     }
 }
 
-private extension Color {
+extension Color {
     init(hex: String) {
         let normalized = hex.trimmingCharacters(in: CharacterSet(charactersIn: "#"))
         let value = UInt64(normalized, radix: 16) ?? 0xF8E7E0

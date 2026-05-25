@@ -155,6 +155,16 @@ final class TaskStore: ObservableObject {
         return true
     }
 
+    @discardableResult
+    func updateTaskNote(_ task: TaskItem, markdown: String) -> Bool {
+        guard let index = tasks.firstIndex(where: { $0.id == task.id }) else {
+            return false
+        }
+
+        tasks[index].noteMarkdown = markdown
+        return true
+    }
+
     func clearCompleted() {
         tasks.removeAll { $0.isDone }
     }
