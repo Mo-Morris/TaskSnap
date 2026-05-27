@@ -5,8 +5,7 @@ import UniformTypeIdentifiers
 struct TaskBoardView: View {
     @ObservedObject var store: TaskStore
     @ObservedObject var pasteCommandDispatcher: PasteCommandDispatcher
-    @Binding var isCollapsed: Bool
-    @Binding var selectedNoteTaskID: TaskItem.ID?
+    @EnvironmentObject private var shellState: AppShellState
     @Environment(\.openSettings) private var openSettings
     @Environment(\.openWindow) private var openWindow
     @State private var isDropTargeted = false
@@ -23,13 +22,13 @@ struct TaskBoardView: View {
 
     var body: some View {
         Group {
-            if isCollapsed {
+            if shellState.isMainWindowCollapsed {
                 CollapsedTaskIconView(
                     activeTaskCount: activeTaskCount,
                     isWorking: !store.summarizingTaskIDs.isEmpty
                 ) {
                     withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
-                        isCollapsed = false
+                        shellState.isMainWindowCollapsed = false
                     }
                 }
             } else {
@@ -37,8 +36,8 @@ struct TaskBoardView: View {
             }
         }
         .overlay {
-            if !isCollapsed || isDropTargeted {
-                RoundedRectangle(cornerRadius: isCollapsed ? 36 : 14)
+            if !shellState.isMainWindowCollapsed || isDropTargeted {
+                RoundedRectangle(cornerRadius: shellState.isMainWindowCollapsed ? 36 : 14)
                     .stroke(
                         isDropTargeted ? Color.accentColor : Color.white.opacity(0.18),
                         lineWidth: isDropTargeted ? 2 : 1
@@ -46,7 +45,7 @@ struct TaskBoardView: View {
                     .allowsHitTesting(false)
             }
         }
-        .clipShape(RoundedRectangle(cornerRadius: isCollapsed ? 36 : 14, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: shellState.isMainWindowCollapsed ? 36 : 14, style: .continuous))
         .onDrop(
             of: [UTType.image.identifier, UTType.fileURL.identifier, UTType.png.identifier, UTType.jpeg.identifier],
             isTargeted: $isDropTargeted,
@@ -67,6 +66,13 @@ struct TaskBoardView: View {
         }
         .onChange(of: pasteCommandDispatcher.requestID) {
             pasteImageFromPasteboard()
+        }
+        .onChange(of: shellState.manualTaskFormRequestID) { _, newValue in
+            guard newValue > 0 else { return }
+            if shellState.isMainWindowCollapsed {
+                shellState.isMainWindowCollapsed = false
+            }
+            isShowingManualTaskForm = true
         }
         .sheet(item: $previewTask) { task in
             ImagePreviewView(task: task)
@@ -184,7 +190,7 @@ struct TaskBoardView: View {
                     } onPreview: {
                         previewTask = task
                     } onEdit: {
-                        selectedNoteTaskID = task.id
+                        shellState.selectedNoteTaskID = task.id
                         openWindow(id: "task-note")
                     } onReorderChanged: { translationHeight, locationY in
                         updateReorderTarget(
@@ -310,8 +316,8 @@ struct TaskBoardView: View {
     }
 
     private func handleDrop(providers: [NSItemProvider]) -> Bool {
-        if isCollapsed {
-            isCollapsed = false
+        if shellState.isMainWindowCollapsed {
+            shellState.isMainWindowCollapsed = false
         }
 
         guard store.visionConfiguration != nil else {
@@ -357,16 +363,16 @@ struct TaskBoardView: View {
 
     private func pasteImageFromPasteboard() {
         guard store.visionConfiguration != nil else {
-            isCollapsed = false
+            shellState.isMainWindowCollapsed = false
             inputAlert = .missingVisionConfiguration
             return
         }
 
         if !store.addImageFromPasteboard() {
-            isCollapsed = false
+            shellState.isMainWindowCollapsed = false
             inputAlert = .addFailed("剪贴板里没有可识别的图片。")
-        } else if isCollapsed {
-            isCollapsed = false
+        } else if shellState.isMainWindowCollapsed {
+            shellState.isMainWindowCollapsed = false
         }
     }
 }

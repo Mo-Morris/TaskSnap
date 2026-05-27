@@ -54,6 +54,8 @@ struct WindowConfigurator: NSViewRepresentable {
         window.standardWindowButton(.closeButton)?.isHidden = isCollapsed
         window.standardWindowButton(.miniaturizeButton)?.isHidden = isCollapsed
 
+        window.sharingType = isCollapsed ? .none : .readWrite
+
         if coordinator.currentIsCollapsed == nil {
             coordinator.currentIsCollapsed = isCollapsed
             coordinator.noteCurrentFrame(window.frame, isCollapsed: isCollapsed)

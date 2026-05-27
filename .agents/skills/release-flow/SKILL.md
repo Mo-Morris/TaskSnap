@@ -7,6 +7,13 @@ description: Fixed release workflow for TaskSnap. Use when publishing a TaskSnap
 
 Use this skill whenever the user asks to publish, release, tag, package, upload a DMG, or prepare a GitHub Release for TaskSnap.
 
+## Non-negotiable UI Requirement
+
+- You must use the `computer-use` skill/tooling for the GitHub Release browser/UI portion of this workflow.
+- This requirement applies to opening the GitHub Release page, checking existing assets in the UI, editing the release, uploading the DMG, and confirming the uploaded asset is visible.
+- Do not replace the GitHub Release UI work with only `gh release`, API calls, shell-only browser commands, or generic web browsing. CLI commands may still be used for git, build, package, tag, and local verification steps.
+- If Computer Use is unavailable or blocked, stop before the GitHub Release UI step and tell the user exactly what is blocked. Do not silently continue with a different upload path.
+
 ## Version
 
 - **Base version** (before collision resolution):
@@ -99,10 +106,11 @@ git worktree remove --force "$TMP_WORKTREE"
 https://github.com/Mo-Morris/TaskSnap/releases/tag/$VERSION
 ```
 
-2. Use Computer Use for the upload step when the user asks for browser/UI upload.
-3. Before uploading, check whether an asset named `TaskSnap-$VERSION.dmg` already exists.
+2. Use Computer Use for every interaction with the release page. This includes navigation, visual inspection, edit mode, file picker/upload, and final confirmation.
+3. Before uploading, visually check whether an asset named `TaskSnap-$VERSION.dmg` already exists on the release page.
 4. If the asset already exists, do not upload a duplicate. Report that the release asset is already present.
-5. If the asset is missing, edit the release and upload the generated DMG file.
+5. If the asset is missing, edit the release through the GitHub UI and upload the generated DMG file with Computer Use.
+6. After the upload finishes, use Computer Use to confirm the `TaskSnap-$VERSION.dmg` asset is visible on the release page.
 
 ## Cleanup
 
