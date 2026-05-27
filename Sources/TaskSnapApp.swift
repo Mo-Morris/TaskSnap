@@ -1,6 +1,5 @@
 import SwiftUI
 
-@main
 struct TaskSnapApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var store = TaskStore()
@@ -63,10 +62,13 @@ struct TaskSnapApp: App {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     weak var pasteCommandDispatcher: PasteCommandDispatcher?
     private var pasteEventMonitor: Any?
+    private var statusItem: NSStatusItem?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.applicationIconImage = AppIcon.makeImage()
-        NSApp.setActivationPolicy(.regular)
+        NSApp.setActivationPolicy(.accessory)
+        installStatusItem()
+        hideMainWindowOnLaunch()
         pasteEventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard
                 event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
@@ -78,6 +80,41 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
             self?.pasteCommandDispatcher?.requestPaste()
             return nil
+        }
+    }
+
+    private func installStatusItem() {
+        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        if let button = item.button {
+            let icon = AppIcon.makeImage(size: 64)
+            icon.size = NSSize(width: 18, height: 18)
+            icon.isTemplate = false
+            button.image = icon
+            button.target = self
+            button.action = #selector(toggleMainWindow)
+            button.toolTip = "TaskSnap"
+        }
+        statusItem = item
+    }
+
+    private func hideMainWindowOnLaunch() {
+        DispatchQueue.main.async { [weak self] in
+            self?.mainWindow()?.orderOut(nil)
+        }
+    }
+
+    private func mainWindow() -> NSWindow? {
+        NSApp.windows.first { $0.title == "TaskSnap" }
+    }
+
+    @objc private func toggleMainWindow() {
+        guard let window = mainWindow() else { return }
+
+        if window.isVisible && (window.isKeyWindow || NSApp.isActive) {
+            window.orderOut(nil)
+        } else {
+            NSApp.activate(ignoringOtherApps: true)
+            window.makeKeyAndOrderFront(nil)
         }
     }
 
