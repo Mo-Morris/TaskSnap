@@ -264,7 +264,7 @@ struct ArchiveWindowView: View {
             Text("暂时没有归档任务")
                 .font(.title3.weight(.semibold))
 
-            Text("在任务列表里向左拖动任务卡片，即可把它移到归档。")
+            Text("拖动任务卡片到底部投放区的「归档」目标，即可把它移到归档。")
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)

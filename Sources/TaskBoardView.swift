@@ -14,9 +14,12 @@ struct TaskBoardView: View {
     @State private var inputAlert: InputAlert?
     @State private var isShowingManualTaskForm = false
     @State private var draggingTaskID: TaskItem.ID?
-    @State private var dragVerticalOffset: CGFloat = 0
+    @State private var dragOffset: CGSize = .zero
+    @State private var dragStartRowFrame: CGRect?
     @State private var reorderTargetIndex: Int?
+    @State private var hoveredDropZone: DropZone?
     @State private var rowFrames: [TaskItem.ID: CGRect] = [:]
+    @State private var dropZoneFrames: [DropZone: CGRect] = [:]
     @FocusState private var isPasteTargetFocused: Bool
 
     private let taskListSpaceName = "taskListSpace"
@@ -186,72 +189,170 @@ struct TaskBoardView: View {
     }
 
     private var taskList: some View {
-        ScrollView {
-            VStack(spacing: 14) {
-                ForEach(Array(visibleTasks.enumerated()), id: \.element.id) { index, task in
-                    TaskRow(
-                        task: task,
-                        isSummarizing: store.summarizingTaskIDs.contains(task.id),
-                        coordinateSpaceName: taskListSpaceName
-                    ) {
-                        store.archive(task)
-                    } onToggleComplete: {
-                        store.toggleCompletion(task)
-                    } onComplete: {
-                        store.complete(task)
-                    } onRestore: {
-                        store.restore(task)
-                    } onPreview: {
-                        previewTask = task
-                    } onEdit: {
-                        editingTask = task
-                    } onOpenNote: {
-                        shellState.selectedNoteTaskID = task.id
-                        openWindow(id: "task-note")
-                    } onReorderChanged: { translationHeight, locationY in
-                        updateReorderTarget(
-                            for: task,
-                            sourceIndex: index,
-                            locationY: locationY,
-                            translationHeight: translationHeight
-                        )
-                    } onReorderEnded: {
-                        finishReorder(for: task)
-                    }
-                    .offset(y: draggingTaskID == task.id ? dragVerticalOffset : 0)
-                    .zIndex(draggingTaskID == task.id ? 10 : 0)
-                    .background(
-                        GeometryReader { proxy in
-                            Color.clear.preference(
-                                key: RowFramePreferenceKey.self,
-                                value: [task.id: proxy.frame(in: .named(taskListSpaceName))]
+        GeometryReader { containerProxy in
+            ZStack(alignment: .topLeading) {
+                ScrollView {
+                    VStack(spacing: 14) {
+                        ForEach(Array(visibleTasks.enumerated()), id: \.element.id) { index, task in
+                            TaskRow(
+                                task: task,
+                                isPickedUp: draggingTaskID == task.id,
+                                isSummarizing: store.summarizingTaskIDs.contains(task.id),
+                                coordinateSpaceName: taskListSpaceName
+                            ) {
+                                store.archive(task)
+                            } onToggleComplete: {
+                                store.toggleCompletion(task)
+                            } onComplete: {
+                                store.complete(task)
+                            } onRestore: {
+                                store.restore(task)
+                            } onPreview: {
+                                previewTask = task
+                            } onEdit: {
+                                editingTask = task
+                            } onOpenNote: {
+                                shellState.selectedNoteTaskID = task.id
+                                openWindow(id: "task-note")
+                            } onDragChanged: { translation, location in
+                                updateDragState(
+                                    for: task,
+                                    sourceIndex: index,
+                                    translation: translation,
+                                    location: location
+                                )
+                            } onDragEnded: {
+                                finishDrag(for: task)
+                            }
+                            .offset(
+                                x: draggingTaskID == task.id ? dragOffset.width : 0,
+                                y: draggingTaskID == task.id ? dragOffset.height : 0
                             )
+                            .zIndex(draggingTaskID == task.id ? 10 : 0)
+                            .background(
+                                GeometryReader { proxy in
+                                    Color.clear.preference(
+                                        key: RowFramePreferenceKey.self,
+                                        value: [task.id: proxy.frame(in: .named(taskListSpaceName))]
+                                    )
+                                }
+                            )
+                            .overlay(alignment: .topTrailing) {
+                                if store.summarizingTaskIDs.contains(task.id) {
+                                    ProgressView()
+                                        .controlSize(.small)
+                                        .padding(.top, 22)
+                                        .padding(.trailing, 22)
+                                        .allowsHitTesting(false)
+                                }
+                            }
                         }
-                    )
-                    .overlay(alignment: .topTrailing) {
-                        if store.summarizingTaskIDs.contains(task.id) {
-                            ProgressView()
-                                .controlSize(.small)
-                                .padding(.top, 22)
-                                .padding(.trailing, 22)
-                                .allowsHitTesting(false)
-                        }
+                    }
+                    .padding(.horizontal, 28)
+                    .padding(.top, 10)
+                    .padding(.bottom, 18)
+                    .frame(maxWidth: .infinity)
+                    .overlay(alignment: .topLeading) {
+                        insertionIndicatorOverlay
+                    }
+                    .onPreferenceChange(RowFramePreferenceKey.self) { newFrames in
+                        rowFrames = newFrames
                     }
                 }
+
+                dropZoneBar
+                    .position(dropZoneBarCenter(in: containerProxy.size))
+                    .opacity(draggingTaskID != nil ? 1 : 0)
+                    .animation(.spring(response: 0.32, dampingFraction: 0.84), value: draggingTaskID)
+                    .allowsHitTesting(false)
             }
-            .padding(.horizontal, 28)
-            .padding(.top, 10)
-            .padding(.bottom, 18)
-            .frame(maxWidth: .infinity)
             .coordinateSpace(name: taskListSpaceName)
-            .overlay(alignment: .topLeading) {
-                insertionIndicatorOverlay
-            }
-            .onPreferenceChange(RowFramePreferenceKey.self) { newFrames in
-                rowFrames = newFrames
+            .onPreferenceChange(DropZoneFramePreferenceKey.self) { newFrames in
+                dropZoneFrames = newFrames
             }
         }
         .frame(maxWidth: .infinity)
+    }
+
+    private func dropZoneBarCenter(in containerSize: CGSize) -> CGPoint {
+        let estimatedHeight: CGFloat = 96
+        let estimatedWidth: CGFloat = 232
+        let spacing: CGFloat = 14
+        let edgeMargin: CGFloat = 14
+
+        guard let rowFrame = dragStartRowFrame else {
+            return CGPoint(x: containerSize.width / 2, y: containerSize.height + estimatedHeight)
+        }
+
+        let cardCenterX = rowFrame.midX
+        let cardTopY = rowFrame.minY
+        let cardBottomY = rowFrame.maxY
+
+        let belowCenterY = cardBottomY + spacing + estimatedHeight / 2
+        let aboveCenterY = cardTopY - spacing - estimatedHeight / 2
+        let bottomLimit = containerSize.height - estimatedHeight / 2 - edgeMargin
+        let topLimit = estimatedHeight / 2 + edgeMargin
+
+        let resolvedY: CGFloat
+        if belowCenterY <= bottomLimit {
+            resolvedY = belowCenterY
+        } else if aboveCenterY >= topLimit {
+            resolvedY = aboveCenterY
+        } else {
+            resolvedY = bottomLimit
+        }
+
+        let leftLimit = estimatedWidth / 2 + edgeMargin
+        let rightLimit = max(leftLimit, containerSize.width - estimatedWidth / 2 - edgeMargin)
+        let resolvedX = min(max(cardCenterX, leftLimit), rightLimit)
+
+        return CGPoint(x: resolvedX, y: resolvedY)
+    }
+
+    private var dropZoneBar: some View {
+        HStack(spacing: 22) {
+            DropZoneTarget(
+                kind: primaryDropZoneKind,
+                isHovered: hoveredDropZone == .toggle
+            )
+            .background(dropZoneFrameReader(zone: .toggle))
+
+            DropZoneTarget(
+                kind: .archive,
+                isHovered: hoveredDropZone == .archive
+            )
+            .background(dropZoneFrameReader(zone: .archive))
+        }
+        .padding(.horizontal, 24)
+        .padding(.vertical, 12)
+        .background {
+            RoundedRectangle(cornerRadius: 26, style: .continuous)
+                .fill(.ultraThinMaterial)
+                .overlay {
+                    RoundedRectangle(cornerRadius: 26, style: .continuous)
+                        .stroke(Color.black.opacity(0.08), lineWidth: 1)
+                }
+                .shadow(color: Color.black.opacity(0.14), radius: 16, y: 5)
+        }
+        .padding(.bottom, 16)
+    }
+
+    private func dropZoneFrameReader(zone: DropZone) -> some View {
+        GeometryReader { proxy in
+            Color.clear.preference(
+                key: DropZoneFramePreferenceKey.self,
+                value: [zone: proxy.frame(in: .named(taskListSpaceName))]
+            )
+        }
+    }
+
+    private var primaryDropZoneKind: DropZoneTargetKind {
+        if let id = draggingTaskID,
+           let task = visibleTasks.first(where: { $0.id == id }),
+           task.status == .completed {
+            return .restore
+        }
+        return .complete
     }
 
     @ViewBuilder
@@ -288,46 +389,78 @@ struct TaskBoardView: View {
         return 10
     }
 
-    private func updateReorderTarget(
+    private func updateDragState(
         for task: TaskItem,
         sourceIndex: Int,
-        locationY: CGFloat,
-        translationHeight: CGFloat
+        translation: CGSize,
+        location: CGPoint
     ) {
         if draggingTaskID != task.id {
             draggingTaskID = task.id
+            dragStartRowFrame = rowFrames[task.id]
         }
-        dragVerticalOffset = translationHeight
+        dragOffset = translation
 
-        let count = visibleTasks.count
-        var bestIndex = sourceIndex
-        var bestDistance = CGFloat.infinity
-        for candidate in 0...count {
-            let distance = abs(insertionLineY(for: candidate) - locationY)
-            if distance < bestDistance {
-                bestDistance = distance
-                bestIndex = candidate
+        var hovered: DropZone?
+        for (zone, frame) in dropZoneFrames where frame.contains(location) {
+            hovered = zone
+            break
+        }
+
+        if hoveredDropZone != hovered {
+            withAnimation(.easeOut(duration: 0.16)) {
+                hoveredDropZone = hovered
             }
         }
 
-        if reorderTargetIndex != bestIndex {
-            withAnimation(.interactiveSpring(response: 0.22, dampingFraction: 0.86)) {
-                reorderTargetIndex = bestIndex
+        if hovered == nil {
+            let count = visibleTasks.count
+            var bestIndex = sourceIndex
+            var bestDistance = CGFloat.infinity
+            for candidate in 0...count {
+                let distance = abs(insertionLineY(for: candidate) - location.y)
+                if distance < bestDistance {
+                    bestDistance = distance
+                    bestIndex = candidate
+                }
+            }
+
+            if reorderTargetIndex != bestIndex {
+                withAnimation(.interactiveSpring(response: 0.22, dampingFraction: 0.86)) {
+                    reorderTargetIndex = bestIndex
+                }
+            }
+        } else if reorderTargetIndex != nil {
+            withAnimation(.easeOut(duration: 0.15)) {
+                reorderTargetIndex = nil
             }
         }
     }
 
-    private func finishReorder(for task: TaskItem) {
-        if let reorderTargetIndex {
+    private func finishDrag(for task: TaskItem) {
+        if let zone = hoveredDropZone {
+            switch zone {
+            case .toggle:
+                if task.status == .completed {
+                    store.restore(task)
+                } else {
+                    store.complete(task)
+                }
+            case .archive:
+                store.archive(task)
+            }
+        } else if let reorderTargetIndex {
             withAnimation(.spring(response: 0.28, dampingFraction: 0.84)) {
                 store.move(task, to: reorderTargetIndex)
             }
         }
 
-        withAnimation(.spring(response: 0.26, dampingFraction: 0.86)) {
+        withAnimation(.spring(response: 0.32, dampingFraction: 0.86)) {
             draggingTaskID = nil
-            dragVerticalOffset = 0
+            dragOffset = .zero
+            dragStartRowFrame = nil
             reorderTargetIndex = nil
+            hoveredDropZone = nil
         }
     }
 
@@ -672,6 +805,7 @@ struct TaskDisplayText {
 
 private struct TaskRow: View {
     let task: TaskItem
+    let isPickedUp: Bool
     let isSummarizing: Bool
     let coordinateSpaceName: String
     let onArchive: () -> Void
@@ -681,11 +815,9 @@ private struct TaskRow: View {
     let onPreview: () -> Void
     let onEdit: () -> Void
     let onOpenNote: () -> Void
-    let onReorderChanged: (CGFloat, CGFloat) -> Void
-    let onReorderEnded: () -> Void
+    let onDragChanged: (CGSize, CGPoint) -> Void
+    let onDragEnded: () -> Void
 
-    @State private var horizontalOffset: CGFloat = 0
-    @State private var dragMode: TaskDragMode?
     @State private var isHovering = false
 
     private var cardColor: Color {
@@ -715,30 +847,6 @@ private struct TaskRow: View {
         }
     }
 
-    private var isDraggingHorizontally: Bool {
-        dragMode == .horizontal && abs(horizontalOffset) > 4
-    }
-
-    private var isSwipingRight: Bool {
-        dragMode == .horizontal && horizontalOffset > 4
-    }
-
-    private var isSwipingLeft: Bool {
-        dragMode == .horizontal && horizontalOffset < -4
-    }
-
-    private var toggleActionIcon: String {
-        isCompleted ? "arrow.uturn.backward" : "checkmark"
-    }
-
-    private var toggleActionTint: Color {
-        isCompleted
-            ? Color(red: 0.45, green: 0.55, blue: 0.85)
-            : Color(red: 0.36, green: 0.66, blue: 0.46)
-    }
-
-    private static let archiveActionTint = Color(red: 0.58, green: 0.45, blue: 0.78)
-
     private var displayTitle: String {
         if isSummarizing {
             return "AI 生成中..."
@@ -756,44 +864,41 @@ private struct TaskRow: View {
     }
 
     var body: some View {
-        ZStack {
-            swipeActions
-
-            cardContent
-                .offset(x: horizontalOffset)
-                .shadow(
-                    color: Color.black.opacity(dragMode == .vertical ? 0.12 : (isCompleted ? 0.025 : 0.07)),
-                    radius: dragMode == .vertical ? 12 : 8,
-                    y: dragMode == .vertical ? 5 : 3
-                )
-                .animation(.easeOut(duration: 0.18), value: dragMode)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .contentShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
-        .gesture(rowDragGesture)
-        .onHover { hovering in
-            guard dragMode == nil else { return }
-            isHovering = hovering
-        }
-        .contextMenu {
-            if isCompleted {
-                Button(action: onRestore) {
-                    Label("恢复进行中", systemImage: "arrow.uturn.backward.circle")
+        cardContent
+            .scaleEffect(isPickedUp ? 1.04 : 1)
+            .shadow(
+                color: Color.black.opacity(isPickedUp ? 0.22 : (isCompleted ? 0.025 : 0.07)),
+                radius: isPickedUp ? 18 : 8,
+                y: isPickedUp ? 10 : 3
+            )
+            .opacity(isPickedUp ? 0.96 : 1)
+            .animation(.spring(response: 0.24, dampingFraction: 0.78), value: isPickedUp)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+            .gesture(rowDragGesture)
+            .onHover { hovering in
+                guard !isPickedUp else { return }
+                isHovering = hovering
+            }
+            .contextMenu {
+                if isCompleted {
+                    Button(action: onRestore) {
+                        Label("恢复进行中", systemImage: "arrow.uturn.backward.circle")
+                    }
+                } else {
+                    Button(action: onComplete) {
+                        Label("标记完成", systemImage: "checkmark.circle")
+                    }
                 }
-            } else {
-                Button(action: onComplete) {
-                    Label("标记完成", systemImage: "checkmark.circle")
+
+                Button(action: onArchive) {
+                    Label("归档任务", systemImage: "archivebox")
+                }
+
+                Button(action: onEdit) {
+                    Label("编辑任务", systemImage: "pencil")
                 }
             }
-
-            Button(action: onArchive) {
-                Label("归档任务", systemImage: "archivebox")
-            }
-
-            Button(action: onEdit) {
-                Label("编辑任务", systemImage: "pencil")
-            }
-        }
     }
 
     private var cardContent: some View {
@@ -822,12 +927,12 @@ private struct TaskRow: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
             .onTapGesture {
-                guard dragMode == nil else { return }
+                guard !isPickedUp else { return }
                 onOpenNote()
             }
 
             DragGrip()
-                .opacity(dragMode == .vertical || isHovering ? 0.62 : 0)
+                .opacity(isPickedUp || isHovering ? 0.62 : 0)
         }
         .padding(.leading, 18)
         .padding(.trailing, 18)
@@ -845,77 +950,17 @@ private struct TaskRow: View {
         .opacity(isCompleted ? 0.68 : 1)
     }
 
-    private var swipeActions: some View {
-        HStack(spacing: 8) {
-            ActionRevealView(
-                systemName: toggleActionIcon,
-                tint: toggleActionTint,
-                alignment: .leading
-            )
-            .opacity(isSwipingRight ? 1 : 0)
-
-            Spacer(minLength: 12)
-
-            ActionRevealView(
-                systemName: "archivebox",
-                tint: Self.archiveActionTint,
-                alignment: .trailing
-            )
-            .opacity(isSwipingLeft ? 1 : 0)
-        }
-        .animation(.easeOut(duration: 0.14), value: horizontalOffset)
-    }
-
     private var rowDragGesture: some Gesture {
-        DragGesture(minimumDistance: 10, coordinateSpace: .named(coordinateSpaceName))
+        DragGesture(minimumDistance: 6, coordinateSpace: .named(coordinateSpaceName))
             .onChanged { value in
-                if dragMode == nil {
-                    if hypot(value.translation.width, value.translation.height) < 12 {
-                        return
-                    }
-                    let isHorizontal = abs(value.translation.width) > abs(value.translation.height)
-                    dragMode = isHorizontal ? .horizontal : .vertical
-                    if dragMode == .vertical {
-                        horizontalOffset = 0
-                        isHovering = false
-                    }
+                if isHovering {
+                    isHovering = false
                 }
-
-                switch dragMode {
-                case .horizontal:
-                    horizontalOffset = min(max(value.translation.width, -92), 92)
-                case .vertical:
-                    onReorderChanged(value.translation.height, value.location.y)
-                case nil:
-                    break
-                }
+                onDragChanged(value.translation, value.location)
             }
             .onEnded { _ in
-                switch dragMode {
-                case .horizontal:
-                    completeHorizontalDrag()
-                case .vertical:
-                    onReorderEnded()
-                case nil:
-                    break
-                }
-
-                dragMode = nil
+                onDragEnded()
             }
-    }
-
-    private func completeHorizontalDrag() {
-        let offset = horizontalOffset
-
-        withAnimation(.spring(response: 0.24, dampingFraction: 0.82)) {
-            horizontalOffset = 0
-        }
-
-        if offset > 72 {
-            onToggleComplete()
-        } else if offset < -72 {
-            onArchive()
-        }
     }
 
     private var leadingVisual: some View {
@@ -1008,29 +1053,75 @@ private struct SourceBadge: View {
     }
 }
 
-private enum TaskDragMode {
-    case horizontal
-    case vertical
+private enum DropZone: Hashable {
+    case toggle
+    case archive
 }
 
-private struct ActionRevealView: View {
-    let systemName: String
-    let tint: Color
-    let alignment: Alignment
+private enum DropZoneTargetKind {
+    case complete
+    case restore
+    case archive
+
+    var iconName: String {
+        switch self {
+        case .complete: "checkmark"
+        case .restore: "arrow.uturn.backward"
+        case .archive: "archivebox"
+        }
+    }
+
+    var label: String {
+        switch self {
+        case .complete: "完成"
+        case .restore: "恢复进行中"
+        case .archive: "归档"
+        }
+    }
+
+    var tint: Color {
+        switch self {
+        case .complete: Color(red: 0.32, green: 0.66, blue: 0.42)
+        case .restore: Color(red: 0.42, green: 0.55, blue: 0.85)
+        case .archive: Color(red: 0.58, green: 0.45, blue: 0.78)
+        }
+    }
+}
+
+private struct DropZoneTarget: View {
+    let kind: DropZoneTargetKind
+    let isHovered: Bool
 
     var body: some View {
-        RoundedRectangle(cornerRadius: 8, style: .continuous)
-            .fill(tint.opacity(0.2))
-            .frame(width: 78)
-            .overlay(alignment: alignment) {
-                Image(systemName: systemName)
-                    .font(.system(size: 16, weight: .bold))
-                    .foregroundStyle(tint)
-                    .frame(width: 34, height: 34)
-                    .background(Color.white.opacity(0.74))
-                    .clipShape(Circle())
-                    .padding(.horizontal, 16)
+        VStack(spacing: 6) {
+            ZStack {
+                Circle()
+                    .fill(kind.tint.opacity(isHovered ? 0.32 : 0.14))
+
+                Image(systemName: kind.iconName)
+                    .font(.system(size: 20, weight: .bold))
+                    .foregroundStyle(kind.tint)
+                    .scaleEffect(isHovered ? 1.1 : 1)
             }
+            .frame(width: 56, height: 56)
+            .overlay {
+                Circle()
+                    .stroke(kind.tint.opacity(isHovered ? 0.55 : 0.18), lineWidth: isHovered ? 1.8 : 1)
+            }
+            .scaleEffect(isHovered ? 1.12 : 1)
+            .shadow(
+                color: kind.tint.opacity(isHovered ? 0.32 : 0),
+                radius: isHovered ? 12 : 0,
+                y: isHovered ? 5 : 0
+            )
+            .animation(.spring(response: 0.26, dampingFraction: 0.78), value: isHovered)
+
+            Text(kind.label)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(kind.tint.opacity(isHovered ? 1.0 : 0.8))
+                .lineLimit(1)
+        }
+        .frame(width: 86)
     }
 }
 
@@ -1588,6 +1679,14 @@ private struct RowFramePreferenceKey: PreferenceKey {
     static let defaultValue: [TaskItem.ID: CGRect] = [:]
 
     static func reduce(value: inout [TaskItem.ID: CGRect], nextValue: () -> [TaskItem.ID: CGRect]) {
+        value.merge(nextValue()) { _, new in new }
+    }
+}
+
+private struct DropZoneFramePreferenceKey: PreferenceKey {
+    static let defaultValue: [DropZone: CGRect] = [:]
+
+    static func reduce(value: inout [DropZone: CGRect], nextValue: () -> [DropZone: CGRect]) {
         value.merge(nextValue()) { _, new in new }
     }
 }
