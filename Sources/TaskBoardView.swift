@@ -753,10 +753,6 @@ private struct TaskRow: View {
             isHovering = hovering
         }
         .contextMenu {
-            Button(action: onArchive) {
-                Label("归档任务", systemImage: "archivebox")
-            }
-
             if isCompleted {
                 Button(action: onRestore) {
                     Label("恢复进行中", systemImage: "arrow.uturn.backward.circle")
@@ -765,6 +761,10 @@ private struct TaskRow: View {
                 Button(action: onComplete) {
                     Label("标记完成", systemImage: "checkmark.circle")
                 }
+            }
+
+            Button(action: onArchive) {
+                Label("归档任务", systemImage: "archivebox")
             }
 
             Button(action: onEdit) {
@@ -824,8 +824,8 @@ private struct TaskRow: View {
     private var swipeActions: some View {
         HStack(spacing: 8) {
             ActionRevealView(
-                systemName: "archivebox",
-                tint: Color(red: 0.38, green: 0.55, blue: 0.76),
+                systemName: isCompleted ? "arrow.uturn.backward" : "checkmark",
+                tint: Color(red: 0.47, green: 0.74, blue: 0.55),
                 alignment: .leading
             )
             .opacity(isDraggingHorizontally ? 1 : 0)
@@ -833,8 +833,8 @@ private struct TaskRow: View {
             Spacer(minLength: 12)
 
             ActionRevealView(
-                systemName: "checkmark",
-                tint: Color(red: 0.47, green: 0.74, blue: 0.55),
+                systemName: "archivebox",
+                tint: Color(red: 0.38, green: 0.55, blue: 0.76),
                 alignment: .trailing
             )
             .opacity(isDraggingHorizontally ? 1 : 0)
@@ -888,9 +888,13 @@ private struct TaskRow: View {
         }
 
         if offset > 72 {
-            onArchive()
+            if isCompleted {
+                onRestore()
+            } else {
+                onComplete()
+            }
         } else if offset < -72 {
-            onComplete()
+            onArchive()
         }
     }
 
