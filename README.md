@@ -108,6 +108,31 @@ swift test
 
 脚本会构建 release 版本，并在临时目录中生成 `TaskSnap-<version>.dmg`。
 
+升级安装：
+
+DMG 中包含 `Install.command`。升级时推荐双击运行它，脚本会覆盖安装到 `/Applications`、清除 macOS 下载隔离属性，并自动启动 TaskSnap。首次运行脚本时，如果 macOS 提示无法打开，请右键点击 `Install.command` 并选择「打开」。
+
+如果手动拖拽 `TaskSnap.app` 到 `/Applications` 后仍遇到「无法验证开发者」提示，可以执行：
+
+```bash
+sudo xattr -dr com.apple.quarantine /Applications/TaskSnap.app
+```
+
+菜单栏图标诊断：
+
+TaskSnap 启动后会出现在 macOS 菜单栏右侧。如果看不到图标，可以按顺序检查进程和隔离属性：
+
+```bash
+pgrep -fl TaskSnap
+xattr -l /Applications/TaskSnap.app
+sudo xattr -dr com.apple.quarantine /Applications/TaskSnap.app
+open /Applications/TaskSnap.app
+sleep 2
+pgrep -fl TaskSnap
+```
+
+如果最后一行能看到 TaskSnap 进程，但菜单栏仍没有图标，可能是菜单栏图标过多或 MacBook 刘海区域导致系统隐藏了部分状态项。
+
 ## 技术栈
 
 - Swift Package Manager

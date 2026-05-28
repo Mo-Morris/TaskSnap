@@ -58,9 +58,11 @@ cat > "${APP_DIR}/Contents/Info.plist" <<PLIST
 PLIST
 
 SIGN_IDENTITY="${TASKSNAP_SIGN_IDENTITY:--}"
-codesign --force --deep --sign "$SIGN_IDENTITY" "$APP_DIR"
+codesign --force --deep --options runtime --sign "$SIGN_IDENTITY" "$APP_DIR"
 codesign --verify --deep --strict --verbose=2 "$APP_DIR"
 
+cp "${REPO_ROOT}/scripts/install.command" "${STAGING_DIR}/Install.command"
+chmod +x "${STAGING_DIR}/Install.command"
 ln -s /Applications "${STAGING_DIR}/Applications"
 
 TMP_DMG="${RELEASE_ROOT}/TaskSnap-${VERSION}.rw.dmg"
@@ -84,13 +86,14 @@ tell application "Finder"
         set current view of container window to icon view
         set toolbar visible of container window to false
         set statusbar visible of container window to false
-        set the bounds of container window to {200, 200, 800, 560}
+        set the bounds of container window to {200, 200, 860, 650}
         set viewOptions to the icon view options of container window
         set arrangement of viewOptions to not arranged
-        set icon size of viewOptions to 160
+        set icon size of viewOptions to 140
         set text size of viewOptions to 13
-        set position of item "TaskSnap.app" of container window to {170, 200}
-        set position of item "Applications" of container window to {470, 200}
+        set position of item "TaskSnap.app" of container window to {170, 210}
+        set position of item "Applications" of container window to {490, 210}
+        set position of item "Install.command" of container window to {330, 420}
         update without registering applications
         delay 1
         close
