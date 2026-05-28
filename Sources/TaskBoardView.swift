@@ -23,6 +23,7 @@ struct TaskBoardView: View {
     @FocusState private var isPasteTargetFocused: Bool
 
     private let taskListSpaceName = "taskListSpace"
+    private let reorderAnimation: Animation = .spring(response: 0.42, dampingFraction: 0.82)
 
     var body: some View {
         Group {
@@ -200,13 +201,21 @@ struct TaskBoardView: View {
                                 isSummarizing: store.summarizingTaskIDs.contains(task.id),
                                 coordinateSpaceName: taskListSpaceName
                             ) {
-                                store.archive(task)
+                                withAnimation(reorderAnimation) {
+                                    store.archive(task)
+                                }
                             } onToggleComplete: {
-                                store.toggleCompletion(task)
+                                withAnimation(reorderAnimation) {
+                                    store.toggleCompletion(task)
+                                }
                             } onComplete: {
-                                store.complete(task)
+                                withAnimation(reorderAnimation) {
+                                    store.complete(task)
+                                }
                             } onRestore: {
-                                store.restore(task)
+                                withAnimation(reorderAnimation) {
+                                    store.restore(task)
+                                }
                             } onPreview: {
                                 previewTask = task
                             } onEdit: {
@@ -441,16 +450,20 @@ struct TaskBoardView: View {
         if let zone = hoveredDropZone {
             switch zone {
             case .toggle:
-                if task.status == .completed {
-                    store.restore(task)
-                } else {
-                    store.complete(task)
+                withAnimation(reorderAnimation) {
+                    if task.status == .completed {
+                        store.restore(task)
+                    } else {
+                        store.complete(task)
+                    }
                 }
             case .archive:
-                store.archive(task)
+                withAnimation(reorderAnimation) {
+                    store.archive(task)
+                }
             }
         } else if let reorderTargetIndex {
-            withAnimation(.spring(response: 0.28, dampingFraction: 0.84)) {
+            withAnimation(reorderAnimation) {
                 store.move(task, to: reorderTargetIndex)
             }
         }

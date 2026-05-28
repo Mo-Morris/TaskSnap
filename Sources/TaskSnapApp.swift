@@ -185,23 +185,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func statusItemClicked(_ sender: Any?) {
-        let eventType = NSApp.currentEvent?.type
-        if eventType == .rightMouseUp {
-            presentStatusMenu()
-        } else {
-            toggleMainWindow()
-        }
-    }
-
-    private func toggleMainWindow() {
-        guard let window = mainWindow() else { return }
-
-        if window.isVisible && (window.isKeyWindow || NSApp.isActive) {
-            window.orderOut(nil)
-        } else {
-            NSApp.activate(ignoringOtherApps: true)
-            window.makeKeyAndOrderFront(nil)
-        }
+        presentStatusMenu()
     }
 
     private func presentStatusMenu() {

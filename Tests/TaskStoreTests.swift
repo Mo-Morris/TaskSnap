@@ -214,8 +214,10 @@ import Testing
     _ = store.addManualTask(title: "已完成任务 A", description: "会进入归档")
     _ = store.addManualTask(title: "已完成任务 B", description: "也会进入归档")
 
-    store.complete(store.tasks[0])
-    store.complete(store.tasks[1])
+    let completedA = store.tasks.first { $0.title == "已完成任务 A" }!
+    let completedB = store.tasks.first { $0.title == "已完成任务 B" }!
+    store.complete(completedA)
+    store.complete(completedB)
     store.archiveCompleted()
 
     #expect(store.tasks.map(\.status).filter { $0 == .archived }.count == 2)
@@ -314,6 +316,47 @@ import Testing
 }
 
 @MainActor
+@Test func taskStorePermanentlyDeletesArchivedTask() {
+    let urls = temporaryStoreURLs()
+    let store = TaskStore(storeURL: urls.tasks, configurationURL: urls.configuration)
+
+    _ = store.addManualTask(title: "待删除归档任务", description: "永久删除后不应再存在")
+    store.archive(store.tasks[0])
+
+    store.permanentlyDelete(store.tasks[0])
+
+    #expect(store.tasks.isEmpty)
+    #expect(store.archivedTasks.isEmpty)
+}
+
+@MainActor
+@Test func taskStorePermanentlyDeleteIgnoresNonArchivedTasks() {
+    let urls = temporaryStoreURLs()
+    let store = TaskStore(storeURL: urls.tasks, configurationURL: urls.configuration)
+
+    _ = store.addManualTask(title: "进行中任务", description: "不在归档中，不应被永久删除")
+
+    store.permanentlyDelete(store.tasks[0])
+
+    #expect(store.tasks.count == 1)
+    #expect(store.tasks[0].status == .active)
+}
+
+@MainActor
+@Test func taskStorePermanentlyDeletePersistsRemoval() {
+    let urls = temporaryStoreURLs()
+    let store = TaskStore(storeURL: urls.tasks, configurationURL: urls.configuration)
+
+    _ = store.addManualTask(title: "待删除归档任务", description: "永久删除后重载也不存在")
+    store.archive(store.tasks[0])
+    store.permanentlyDelete(store.tasks[0])
+
+    let reloadedStore = TaskStore(storeURL: urls.tasks, configurationURL: urls.configuration)
+
+    #expect(reloadedStore.tasks.isEmpty)
+}
+
+@MainActor
 @Test func taskStoreUnarchiveIgnoresNonArchivedTasks() {
     let urls = temporaryStoreURLs()
     let store = TaskStore(storeURL: urls.tasks, configurationURL: urls.configuration)
@@ -400,6 +443,85 @@ import Testing
 
     #expect(didAdd == true)
     #expect(store.tasks.first?.title == "检查结算页异常")
+}
+
+@MainActor
+@Test func taskStoreCompletingTaskMovesItToBottomOfVisibleList() {
+    let urls = temporaryStoreURLs()
+    let store = TaskStore(storeURL: urls.tasks, configurationURL: urls.configuration)
+
+    _ = store.addManualTask(title: "C", description: "最早")
+    _ = store.addManualTask(title: "B", description: "中间")
+    _ = store.addManualTask(title: "A", description: "最新")
+
+    #expect(store.visibleTasks.map(\.title) == ["A", "B", "C"])
+
+    let taskB = store.tasks.first { $0.title == "B" }!
+    store.complete(taskB)
+
+    #expect(store.visibleTasks.map(\.title) == ["A", "C", "B"])
+    #expect(store.visibleTasks.last?.title == "B")
+    #expect(store.visibleTasks.last?.status == .completed)
+}
+
+@MainActor
+@Test func taskStoreRestoringTaskMovesItToTopOfVisibleList() {
+    let urls = temporaryStoreURLs()
+    let store = TaskStore(storeURL: urls.tasks, configurationURL: urls.configuration)
+
+    _ = store.addManualTask(title: "C", description: "最早")
+    _ = store.addManualTask(title: "B", description: "中间")
+    _ = store.addManualTask(title: "A", description: "最新")
+
+    let taskC = store.tasks.first { $0.title == "C" }!
+    store.complete(taskC)
+
+    #expect(store.visibleTasks.map(\.title) == ["A", "B", "C"])
+
+    store.restore(taskC)
+
+    #expect(store.visibleTasks.first?.title == "C")
+    #expect(store.visibleTasks.first?.status == .active)
+    #expect(store.visibleTasks.map(\.title) == ["C", "A", "B"])
+}
+
+@MainActor
+@Test func taskStoreCompletingTaskKeepsArchivedTasksInPlace() {
+    let urls = temporaryStoreURLs()
+    let store = TaskStore(storeURL: urls.tasks, configurationURL: urls.configuration)
+
+    _ = store.addManualTask(title: "C", description: "最早")
+    _ = store.addManualTask(title: "B", description: "中间")
+    _ = store.addManualTask(title: "A", description: "最新")
+
+    let taskC = store.tasks.first { $0.title == "C" }!
+    store.archive(taskC)
+
+    let taskA = store.tasks.first { $0.title == "A" }!
+    store.complete(taskA)
+
+    #expect(store.archivedTasks.map(\.title) == ["C"])
+    #expect(store.visibleTasks.map(\.title) == ["B", "A"])
+    #expect(store.visibleTasks.last?.status == .completed)
+}
+
+@MainActor
+@Test func taskStoreToggleCompletionRepositionsTask() {
+    let urls = temporaryStoreURLs()
+    let store = TaskStore(storeURL: urls.tasks, configurationURL: urls.configuration)
+
+    _ = store.addManualTask(title: "C", description: "最早")
+    _ = store.addManualTask(title: "B", description: "中间")
+    _ = store.addManualTask(title: "A", description: "最新")
+
+    let taskA = store.tasks.first { $0.title == "A" }!
+    store.toggleCompletion(taskA)
+    #expect(store.visibleTasks.map(\.title) == ["B", "C", "A"])
+    #expect(store.visibleTasks.last?.status == .completed)
+
+    store.toggleCompletion(taskA)
+    #expect(store.visibleTasks.first?.title == "A")
+    #expect(store.visibleTasks.first?.status == .active)
 }
 
 @MainActor

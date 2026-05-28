@@ -135,7 +135,9 @@ final class TaskStore: ObservableObject {
             return
         }
 
-        tasks[index].status = .completed
+        var updated = tasks.remove(at: index)
+        updated.status = .completed
+        tasks.insert(updated, at: insertionIndexForBottomOfVisible())
     }
 
     func restore(_ task: TaskItem) {
@@ -147,7 +149,9 @@ final class TaskStore: ObservableObject {
             return
         }
 
-        tasks[index].status = .active
+        var updated = tasks.remove(at: index)
+        updated.status = .active
+        tasks.insert(updated, at: insertionIndexForTopOfVisible())
     }
 
     func archive(_ task: TaskItem) {
@@ -169,12 +173,23 @@ final class TaskStore: ObservableObject {
 
         switch tasks[index].status {
         case .active:
-            tasks[index].status = .completed
+            complete(task)
         case .completed:
-            tasks[index].status = .active
+            restore(task)
         case .archived:
             break
         }
+    }
+
+    private func insertionIndexForBottomOfVisible() -> Int {
+        if let lastVisible = tasks.lastIndex(where: { $0.status != .archived }) {
+            return lastVisible + 1
+        }
+        return tasks.count
+    }
+
+    private func insertionIndexForTopOfVisible() -> Int {
+        tasks.firstIndex { $0.status != .archived } ?? 0
     }
 
     func unarchive(_ task: TaskItem) {
@@ -187,6 +202,18 @@ final class TaskStore: ObservableObject {
         }
 
         tasks[index].status = .active
+    }
+
+    func permanentlyDelete(_ task: TaskItem) {
+        guard let index = tasks.firstIndex(where: { $0.id == task.id }) else {
+            return
+        }
+
+        guard tasks[index].status == .archived else {
+            return
+        }
+
+        tasks.remove(at: index)
     }
 
     func move(_ task: TaskItem, to targetIndex: Int) {

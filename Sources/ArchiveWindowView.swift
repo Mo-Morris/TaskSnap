@@ -6,6 +6,7 @@ struct ArchiveWindowView: View {
     @Binding var selectedTaskID: TaskItem.ID?
 
     @State private var previewImageTask: TaskItem?
+    @State private var taskPendingDeletion: TaskItem?
 
     private let createdAtFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -48,6 +49,16 @@ struct ArchiveWindowView: View {
         }
         .sheet(item: $previewImageTask) { task in
             ArchiveImagePreviewView(task: task)
+        }
+        .alert(item: $taskPendingDeletion) { task in
+            Alert(
+                title: Text("永久删除此任务？"),
+                message: Text("此操作无法撤销，任务及其所有内容将被永久移除。"),
+                primaryButton: .destructive(Text("删除")) {
+                    store.permanentlyDelete(task)
+                },
+                secondaryButton: .cancel(Text("取消"))
+            )
         }
     }
 
@@ -144,6 +155,16 @@ struct ArchiveWindowView: View {
             .buttonStyle(.borderedProminent)
             .controlSize(.regular)
             .help("将任务恢复为进行中并放回任务列表")
+
+            Button(role: .destructive) {
+                taskPendingDeletion = task
+            } label: {
+                Label("永久删除", systemImage: "trash")
+                    .font(.system(size: 13, weight: .semibold))
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.regular)
+            .help("从归档中永久删除此任务，无法恢复")
         }
         .padding(.horizontal, 28)
         .frame(height: 64)
