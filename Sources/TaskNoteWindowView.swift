@@ -12,12 +12,16 @@ struct TaskNoteWindowView: View {
     @State private var isOutlineVisible = true
     @FocusState private var isEditorFocused: Bool
 
+    private var visibleTasks: [TaskItem] {
+        store.visibleTasks
+    }
+
     private var selectedTask: TaskItem? {
         guard let selectedTaskID else {
-            return store.tasks.first
+            return visibleTasks.first
         }
 
-        return store.tasks.first { $0.id == selectedTaskID } ?? store.tasks.first
+        return visibleTasks.first { $0.id == selectedTaskID } ?? visibleTasks.first
     }
 
     private var noteMarkdownBinding: Binding<String> {
@@ -31,7 +35,7 @@ struct TaskNoteWindowView: View {
 
     var body: some View {
         Group {
-            if store.tasks.isEmpty {
+            if visibleTasks.isEmpty {
                 emptyWindow
             } else {
                 noteWindow
@@ -40,7 +44,7 @@ struct TaskNoteWindowView: View {
         .background(Color(nsColor: .windowBackgroundColor))
         .onAppear {
             if selectedTaskID == nil {
-                selectedTaskID = store.tasks.first?.id
+                selectedTaskID = visibleTasks.first?.id
             }
             updateModeForSelectedTask()
         }
@@ -93,7 +97,7 @@ struct TaskNoteWindowView: View {
 
             ScrollView {
                 VStack(spacing: 10) {
-                    ForEach(store.tasks) { task in
+                    ForEach(visibleTasks) { task in
                         TaskTitleListItem(
                             task: task,
                             isSelected: task.id == selectedTask?.id
@@ -134,7 +138,7 @@ struct TaskNoteWindowView: View {
             .help("展开任务列表")
             .accessibilityLabel("展开任务列表")
 
-            Text("\(store.tasks.count)")
+            Text("\(visibleTasks.count)")
                 .font(.system(size: 12, weight: .semibold))
                 .monospacedDigit()
                 .foregroundStyle(.secondary)
@@ -327,7 +331,7 @@ private struct TaskTitleListItem: View {
         let noteState = (task.noteMarkdown?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false)
             ? "已关联笔记"
             : "空笔记"
-        let doneState = task.isDone ? "已完成" : "进行中"
+        let doneState = task.status == .completed ? "已完成" : "进行中"
         return "\(noteState) · \(doneState)"
     }
 }

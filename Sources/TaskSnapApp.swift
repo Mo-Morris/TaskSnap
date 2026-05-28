@@ -60,8 +60,8 @@ struct TaskSnapApp: App {
 
         .commands {
             CommandGroup(replacing: .newItem) {
-                Button("清空已完成任务") {
-                    store.clearCompleted()
+                Button("归档已完成任务") {
+                    store.archiveCompleted()
                 }
                 .keyboardShortcut(.delete, modifiers: [.command, .shift])
             }
@@ -132,7 +132,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         if let button = item.button {
             let icon = MenuBarIcon.makeTemplateImage()
-            icon.size = NSSize(width: 18, height: 18)
+            icon.size = NSSize(width: 20, height: 20)
             button.image = icon
             button.target = self
             button.action = #selector(statusItemClicked(_:))
@@ -222,12 +222,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(manualTaskItem)
 
         let clearCompletedItem = NSMenuItem(
-            title: "清空已完成任务",
-            action: #selector(menuClearCompletedTasks),
+            title: "归档已完成任务",
+            action: #selector(menuArchiveCompletedTasks),
             keyEquivalent: ""
         )
         clearCompletedItem.target = self
-        clearCompletedItem.isEnabled = (store?.tasks.contains(where: { $0.isDone }) ?? false)
+        clearCompletedItem.isEnabled = (store?.tasks.contains(where: { $0.status == .completed }) ?? false)
         menu.addItem(clearCompletedItem)
 
         menu.addItem(NSMenuItem.separator())
@@ -293,8 +293,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         shellState.manualTaskFormRequestID &+= 1
     }
 
-    @objc private func menuClearCompletedTasks() {
-        store?.clearCompleted()
+    @objc private func menuArchiveCompletedTasks() {
+        store?.archiveCompleted()
     }
 
     @objc private func menuOpenPreferences() {

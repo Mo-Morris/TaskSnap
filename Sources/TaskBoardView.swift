@@ -10,6 +10,7 @@ struct TaskBoardView: View {
     @Environment(\.openWindow) private var openWindow
     @State private var isDropTargeted = false
     @State private var previewTask: TaskItem?
+    @State private var editingTask: TaskItem?
     @State private var inputAlert: InputAlert?
     @State private var isShowingManualTaskForm = false
     @State private var draggingTaskID: TaskItem.ID?
@@ -82,6 +83,11 @@ struct TaskBoardView: View {
                 store.addManualTask(title: title, description: description)
             }
         }
+        .sheet(item: $editingTask) { task in
+            TaskEditFormView(task: task) { title, description in
+                store.updateTask(task, title: title, description: description)
+            }
+        }
         .alert(inputAlert?.title ?? "", isPresented: Binding(
             get: { inputAlert != nil },
             set: { if !$0 { inputAlert = nil } }
@@ -102,14 +108,18 @@ struct TaskBoardView: View {
     }
 
     private var activeTaskCount: Int {
-        store.tasks.filter { !$0.isDone }.count
+        store.activeTaskCount
+    }
+
+    private var visibleTasks: [TaskItem] {
+        store.visibleTasks
     }
 
     private var expandedBoard: some View {
         VStack(spacing: 0) {
             titleBar
 
-            if store.tasks.isEmpty {
+            if visibleTasks.isEmpty {
                 emptyState
             } else {
                 taskList
@@ -178,18 +188,22 @@ struct TaskBoardView: View {
     private var taskList: some View {
         ScrollView {
             VStack(spacing: 14) {
-                ForEach(Array(store.tasks.enumerated()), id: \.element.id) { index, task in
+                ForEach(Array(visibleTasks.enumerated()), id: \.element.id) { index, task in
                     TaskRow(
                         task: task,
                         isSummarizing: store.summarizingTaskIDs.contains(task.id),
                         coordinateSpaceName: taskListSpaceName
                     ) {
-                        store.toggle(task)
-                    } onDelete: {
-                        store.delete(task)
+                        store.archive(task)
+                    } onComplete: {
+                        store.complete(task)
+                    } onRestore: {
+                        store.restore(task)
                     } onPreview: {
                         previewTask = task
                     } onEdit: {
+                        editingTask = task
+                    } onOpenNote: {
                         shellState.selectedNoteTaskID = task.id
                         openWindow(id: "task-note")
                     } onReorderChanged: { translationHeight, locationY in
@@ -251,7 +265,7 @@ struct TaskBoardView: View {
     }
 
     private func insertionLineY(for index: Int) -> CGFloat {
-        let tasks = store.tasks
+        let tasks = visibleTasks
         guard !tasks.isEmpty else { return 10 }
 
         if index <= 0 {
@@ -283,7 +297,7 @@ struct TaskBoardView: View {
         }
         dragVerticalOffset = translationHeight
 
-        let count = store.tasks.count
+        let count = visibleTasks.count
         var bestIndex = sourceIndex
         var bestDistance = CGFloat.infinity
         for candidate in 0...count {
@@ -658,10 +672,12 @@ private struct TaskRow: View {
     let task: TaskItem
     let isSummarizing: Bool
     let coordinateSpaceName: String
-    let onToggle: () -> Void
-    let onDelete: () -> Void
+    let onArchive: () -> Void
+    let onComplete: () -> Void
+    let onRestore: () -> Void
     let onPreview: () -> Void
     let onEdit: () -> Void
+    let onOpenNote: () -> Void
     let onReorderChanged: (CGFloat, CGFloat) -> Void
     let onReorderEnded: () -> Void
 
@@ -712,6 +728,10 @@ private struct TaskRow: View {
         TaskDisplayText(task: task).description
     }
 
+    private var isCompleted: Bool {
+        task.status == .completed
+    }
+
     var body: some View {
         ZStack {
             swipeActions
@@ -719,7 +739,7 @@ private struct TaskRow: View {
             cardContent
                 .offset(x: horizontalOffset)
                 .shadow(
-                    color: Color.black.opacity(dragMode == .vertical ? 0.12 : (task.isDone ? 0.025 : 0.07)),
+                    color: Color.black.opacity(dragMode == .vertical ? 0.12 : (isCompleted ? 0.025 : 0.07)),
                     radius: dragMode == .vertical ? 12 : 8,
                     y: dragMode == .vertical ? 5 : 3
                 )
@@ -733,12 +753,22 @@ private struct TaskRow: View {
             isHovering = hovering
         }
         .contextMenu {
-            Button(action: onToggle) {
-                Label(task.isDone ? "标记为未完成" : "完成任务", systemImage: "checkmark.circle")
+            Button(action: onArchive) {
+                Label("归档任务", systemImage: "archivebox")
             }
 
-            Button(role: .destructive, action: onDelete) {
-                Label("删除任务", systemImage: "trash")
+            if isCompleted {
+                Button(action: onRestore) {
+                    Label("恢复进行中", systemImage: "arrow.uturn.backward.circle")
+                }
+            } else {
+                Button(action: onComplete) {
+                    Label("标记完成", systemImage: "checkmark.circle")
+                }
+            }
+
+            Button(action: onEdit) {
+                Label("编辑任务", systemImage: "pencil")
             }
         }
     }
@@ -750,8 +780,8 @@ private struct TaskRow: View {
             VStack(alignment: .leading, spacing: 7) {
                 Text(displayTitle)
                     .font(.headline.weight(.semibold))
-                    .foregroundStyle(task.isDone ? .secondary : .primary)
-                    .strikethrough(task.isDone)
+                    .foregroundStyle(isCompleted ? .secondary : .primary)
+                    .strikethrough(isCompleted)
                     .lineLimit(2)
                     .minimumScaleFactor(0.72)
                     .multilineTextAlignment(.leading)
@@ -769,7 +799,7 @@ private struct TaskRow: View {
             .contentShape(Rectangle())
             .onTapGesture {
                 guard dragMode == nil else { return }
-                onEdit()
+                onOpenNote()
             }
 
             DragGrip()
@@ -781,21 +811,21 @@ private struct TaskRow: View {
         .frame(minHeight: 70)
         .background {
             RoundedRectangle(cornerRadius: 13, style: .continuous)
-                .fill(cardColor.opacity(task.isDone ? 0.18 : 0.34))
+                .fill(cardColor.opacity(isCompleted ? 0.18 : 0.34))
         }
         .overlay {
             RoundedRectangle(cornerRadius: 13, style: .continuous)
                 .stroke(cardColor.opacity(0.72), lineWidth: 1.2)
                 .allowsHitTesting(false)
         }
-        .opacity(task.isDone ? 0.68 : 1)
+        .opacity(isCompleted ? 0.68 : 1)
     }
 
     private var swipeActions: some View {
         HStack(spacing: 8) {
             ActionRevealView(
-                systemName: "checkmark",
-                tint: Color(red: 0.47, green: 0.74, blue: 0.55),
+                systemName: "archivebox",
+                tint: Color(red: 0.38, green: 0.55, blue: 0.76),
                 alignment: .leading
             )
             .opacity(isDraggingHorizontally ? 1 : 0)
@@ -803,8 +833,8 @@ private struct TaskRow: View {
             Spacer(minLength: 12)
 
             ActionRevealView(
-                systemName: "trash",
-                tint: Color(red: 0.9, green: 0.46, blue: 0.42),
+                systemName: "checkmark",
+                tint: Color(red: 0.47, green: 0.74, blue: 0.55),
                 alignment: .trailing
             )
             .opacity(isDraggingHorizontally ? 1 : 0)
@@ -858,9 +888,9 @@ private struct TaskRow: View {
         }
 
         if offset > 72 {
-            onToggle()
+            onArchive()
         } else if offset < -72 {
-            onDelete()
+            onComplete()
         }
     }
 
@@ -886,7 +916,7 @@ private struct TaskRow: View {
                         .scaledToFill()
                         .frame(width: 36, height: 36)
                         .clipped()
-                        .opacity(task.isDone ? 0.5 : 1)
+                        .opacity(isCompleted ? 0.5 : 1)
 
                     Image(systemName: "arrow.up.left.and.arrow.down.right")
                         .font(.system(size: 8, weight: .semibold))
@@ -932,7 +962,7 @@ private struct TaskRow: View {
                 Image(systemName: task.manualIconName ?? TaskItem.randomManualIconName())
                     .font(.system(size: 15, weight: .semibold))
                     .symbolRenderingMode(.hierarchical)
-                    .foregroundStyle(manualIconColor.opacity(task.isDone ? 0.62 : 1))
+                    .foregroundStyle(manualIconColor.opacity(isCompleted ? 0.62 : 1))
             }
             .overlay {
                 RoundedRectangle(cornerRadius: 18, style: .continuous)

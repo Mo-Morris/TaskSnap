@@ -12,6 +12,14 @@ final class TaskStore: ObservableObject {
     @Published private(set) var visionConfiguration: VisionModelConfiguration?
     @Published private(set) var summarizingTaskIDs: Set<TaskItem.ID> = []
 
+    var visibleTasks: [TaskItem] {
+        tasks.filter { $0.status != .archived }
+    }
+
+    var activeTaskCount: Int {
+        tasks.filter { $0.status == .active }.count
+    }
+
     private let storeURL: URL
     private let configurationURL: URL
     private let visionSummarizer: VisionSummarizing
@@ -114,16 +122,40 @@ final class TaskStore: ObservableObject {
         try? FileManager.default.removeItem(at: configurationURL)
     }
 
-    func toggle(_ task: TaskItem) {
+    func complete(_ task: TaskItem) {
         guard let index = tasks.firstIndex(where: { $0.id == task.id }) else {
             return
         }
 
-        tasks[index].isDone.toggle()
+        guard tasks[index].status == .active else {
+            return
+        }
+
+        tasks[index].status = .completed
     }
 
-    func delete(_ task: TaskItem) {
-        tasks.removeAll { $0.id == task.id }
+    func restore(_ task: TaskItem) {
+        guard let index = tasks.firstIndex(where: { $0.id == task.id }) else {
+            return
+        }
+
+        guard tasks[index].status == .completed else {
+            return
+        }
+
+        tasks[index].status = .active
+    }
+
+    func archive(_ task: TaskItem) {
+        guard let index = tasks.firstIndex(where: { $0.id == task.id }) else {
+            return
+        }
+
+        guard tasks[index].status != .archived else {
+            return
+        }
+
+        tasks[index].status = .archived
     }
 
     func move(_ task: TaskItem, to targetIndex: Int) {
@@ -132,8 +164,19 @@ final class TaskStore: ObservableObject {
         }
 
         let task = tasks.remove(at: sourceIndex)
-        let adjustedIndex = targetIndex > sourceIndex ? targetIndex - 1 : targetIndex
-        let insertionIndex = min(max(adjustedIndex, 0), tasks.count)
+        let visibleTasksAfterRemoval = tasks.filter { $0.status != .archived }
+        let insertionIndex: Int
+
+        if targetIndex <= 0 {
+            insertionIndex = tasks.firstIndex { $0.status != .archived } ?? tasks.count
+        } else if targetIndex >= visibleTasksAfterRemoval.count {
+            let lastVisibleIndex = tasks.lastIndex { $0.status != .archived }
+            insertionIndex = lastVisibleIndex.map { $0 + 1 } ?? tasks.count
+        } else {
+            let targetTaskID = visibleTasksAfterRemoval[targetIndex].id
+            insertionIndex = tasks.firstIndex { $0.id == targetTaskID } ?? tasks.count
+        }
+
         tasks.insert(task, at: insertionIndex)
     }
 
@@ -165,8 +208,10 @@ final class TaskStore: ObservableObject {
         return true
     }
 
-    func clearCompleted() {
-        tasks.removeAll { $0.isDone }
+    func archiveCompleted() {
+        for index in tasks.indices where tasks[index].status == .completed {
+            tasks[index].status = .archived
+        }
     }
 
     private func load() {
