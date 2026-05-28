@@ -824,7 +824,7 @@ private struct TaskRow: View {
     private var swipeActions: some View {
         HStack(spacing: 8) {
             ActionRevealView(
-                systemName: isCompleted ? "arrow.uturn.backward" : "checkmark",
+                systemName: "checkmark",
                 tint: Color(red: 0.47, green: 0.74, blue: 0.55),
                 alignment: .leading
             )
@@ -888,11 +888,7 @@ private struct TaskRow: View {
         }
 
         if offset > 72 {
-            if isCompleted {
-                onRestore()
-            } else {
-                onComplete()
-            }
+            onComplete()
         } else if offset < -72 {
             onArchive()
         }
