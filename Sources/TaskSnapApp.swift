@@ -5,6 +5,7 @@ import SwiftUI
 final class AppShellState: ObservableObject {
     @Published var isMainWindowCollapsed: Bool = false
     @Published var selectedNoteTaskID: TaskItem.ID?
+    @Published var selectedArchivedTaskID: TaskItem.ID?
     @Published var manualTaskFormRequestID: Int = 0
 }
 
@@ -45,6 +46,13 @@ struct TaskSnapApp: App {
                 .allowsHitTesting(false)
                 .frame(width: 0, height: 0)
             }
+            .background {
+                ArchiveWindowOpenerBridge { openArchiveWindow in
+                    appDelegate.openArchiveWindow = openArchiveWindow
+                }
+                .allowsHitTesting(false)
+                .frame(width: 0, height: 0)
+            }
         }
         .windowStyle(.hiddenTitleBar)
 
@@ -55,6 +63,12 @@ struct TaskSnapApp: App {
                     NoteWindowConfigurator()
                         .allowsHitTesting(false)
                 }
+        }
+        .windowStyle(.hiddenTitleBar)
+
+        Window("归档管理", id: "task-archive") {
+            ArchiveWindowView(store: store, selectedTaskID: $shellState.selectedArchivedTaskID)
+                .frame(minWidth: 820, idealWidth: 1080, minHeight: 560, idealHeight: 720)
         }
         .windowStyle(.hiddenTitleBar)
 
@@ -88,12 +102,28 @@ private struct NoteWindowOpenerBridge: View {
     }
 }
 
+private struct ArchiveWindowOpenerBridge: View {
+    let register: (@escaping () -> Void) -> Void
+
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        Color.clear
+            .onAppear {
+                register {
+                    openWindow(id: "task-archive")
+                }
+            }
+    }
+}
+
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     weak var pasteCommandDispatcher: PasteCommandDispatcher?
     weak var shellState: AppShellState?
     weak var store: TaskStore?
     var openNoteWindow: (() -> Void)?
+    var openArchiveWindow: (() -> Void)?
     private var pasteEventMonitor: Any?
     private var statusItem: NSStatusItem?
 
@@ -221,6 +251,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         manualTaskItem.target = self
         menu.addItem(manualTaskItem)
 
+        let archiveManagerItem = NSMenuItem(
+            title: "归档管理…",
+            action: #selector(menuOpenArchiveWindow),
+            keyEquivalent: ""
+        )
+        archiveManagerItem.target = self
+        menu.addItem(archiveManagerItem)
+
         let clearCompletedItem = NSMenuItem(
             title: "归档已完成任务",
             action: #selector(menuArchiveCompletedTasks),
@@ -282,6 +320,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func menuOpenNoteWindow() {
         NSApp.activate(ignoringOtherApps: true)
         openNoteWindow?()
+    }
+
+    @objc private func menuOpenArchiveWindow() {
+        NSApp.activate(ignoringOtherApps: true)
+        openArchiveWindow?()
     }
 
     @objc private func menuTriggerManualTaskForm() {

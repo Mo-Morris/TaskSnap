@@ -461,7 +461,7 @@ private enum NoteDisplayMode {
     case markdown
 }
 
-private struct MarkdownPreviewView: View {
+struct MarkdownPreviewView: View {
     let markdown: String
     let isOutlineVisible: Bool
 

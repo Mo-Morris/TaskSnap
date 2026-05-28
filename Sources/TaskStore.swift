@@ -16,6 +16,10 @@ final class TaskStore: ObservableObject {
         tasks.filter { $0.status != .archived }
     }
 
+    var archivedTasks: [TaskItem] {
+        tasks.filter { $0.status == .archived }
+    }
+
     var activeTaskCount: Int {
         tasks.filter { $0.status == .active }.count
     }
@@ -156,6 +160,33 @@ final class TaskStore: ObservableObject {
         }
 
         tasks[index].status = .archived
+    }
+
+    func toggleCompletion(_ task: TaskItem) {
+        guard let index = tasks.firstIndex(where: { $0.id == task.id }) else {
+            return
+        }
+
+        switch tasks[index].status {
+        case .active:
+            tasks[index].status = .completed
+        case .completed:
+            tasks[index].status = .active
+        case .archived:
+            break
+        }
+    }
+
+    func unarchive(_ task: TaskItem) {
+        guard let index = tasks.firstIndex(where: { $0.id == task.id }) else {
+            return
+        }
+
+        guard tasks[index].status == .archived else {
+            return
+        }
+
+        tasks[index].status = .active
     }
 
     func move(_ task: TaskItem, to targetIndex: Int) {

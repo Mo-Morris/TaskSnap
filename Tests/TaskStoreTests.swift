@@ -28,6 +28,8 @@ import Testing
 
     store.complete(store.tasks[0])
     #expect(store.tasks[0].status == .completed)
+    #expect(store.visibleTasks.count == 1)
+    #expect(store.visibleTasks[0].status == .completed)
 }
 
 @MainActor
@@ -267,6 +269,76 @@ import Testing
     #expect(store.tasks.count == 1)
     #expect(store.tasks[0].status == .completed)
     #expect(store.visibleTasks.count == 1)
+}
+
+@MainActor
+@Test func taskStoreToggleCompletionFlipsActiveAndCompleted() {
+    let urls = temporaryStoreURLs()
+    let store = TaskStore(storeURL: urls.tasks, configurationURL: urls.configuration)
+
+    _ = store.addManualTask(title: "整理周会待办", description: "记录本周要跟进的接口、发布和验收事项")
+
+    store.toggleCompletion(store.tasks[0])
+    #expect(store.tasks[0].status == .completed)
+
+    store.toggleCompletion(store.tasks[0])
+    #expect(store.tasks[0].status == .active)
+}
+
+@MainActor
+@Test func taskStoreToggleCompletionDoesNothingOnArchivedTasks() {
+    let urls = temporaryStoreURLs()
+    let store = TaskStore(storeURL: urls.tasks, configurationURL: urls.configuration)
+
+    _ = store.addManualTask(title: "已归档任务", description: "在归档列表中不会被切换状态")
+    store.archive(store.tasks[0])
+
+    store.toggleCompletion(store.tasks[0])
+
+    #expect(store.tasks[0].status == .archived)
+}
+
+@MainActor
+@Test func taskStoreUnarchiveRestoresTaskToActive() {
+    let urls = temporaryStoreURLs()
+    let store = TaskStore(storeURL: urls.tasks, configurationURL: urls.configuration)
+
+    _ = store.addManualTask(title: "待恢复的归档任务", description: "撤销归档后应该回到任务列表")
+    store.archive(store.tasks[0])
+
+    store.unarchive(store.tasks[0])
+
+    #expect(store.tasks[0].status == .active)
+    #expect(store.visibleTasks.count == 1)
+    #expect(store.archivedTasks.isEmpty)
+}
+
+@MainActor
+@Test func taskStoreUnarchiveIgnoresNonArchivedTasks() {
+    let urls = temporaryStoreURLs()
+    let store = TaskStore(storeURL: urls.tasks, configurationURL: urls.configuration)
+
+    _ = store.addManualTask(title: "进行中任务", description: "撤销归档对它无效")
+
+    store.unarchive(store.tasks[0])
+
+    #expect(store.tasks[0].status == .active)
+}
+
+@MainActor
+@Test func taskStoreArchivedTasksOnlyContainsArchivedItems() {
+    let urls = temporaryStoreURLs()
+    let store = TaskStore(storeURL: urls.tasks, configurationURL: urls.configuration)
+
+    _ = store.addManualTask(title: "进行中任务", description: "不在归档列表")
+    _ = store.addManualTask(title: "已完成任务", description: "也不在归档列表")
+    _ = store.addManualTask(title: "归档任务", description: "在归档列表里")
+
+    store.complete(store.tasks[1])
+    store.archive(store.tasks[0])
+
+    #expect(store.archivedTasks.count == 1)
+    #expect(store.archivedTasks[0].title == "归档任务")
 }
 
 @MainActor

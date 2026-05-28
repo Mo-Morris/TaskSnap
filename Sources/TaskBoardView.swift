@@ -195,6 +195,8 @@ struct TaskBoardView: View {
                         coordinateSpaceName: taskListSpaceName
                     ) {
                         store.archive(task)
+                    } onToggleComplete: {
+                        store.toggleCompletion(task)
                     } onComplete: {
                         store.complete(task)
                     } onRestore: {
@@ -673,6 +675,7 @@ private struct TaskRow: View {
     let isSummarizing: Bool
     let coordinateSpaceName: String
     let onArchive: () -> Void
+    let onToggleComplete: () -> Void
     let onComplete: () -> Void
     let onRestore: () -> Void
     let onPreview: () -> Void
@@ -715,6 +718,26 @@ private struct TaskRow: View {
     private var isDraggingHorizontally: Bool {
         dragMode == .horizontal && abs(horizontalOffset) > 4
     }
+
+    private var isSwipingRight: Bool {
+        dragMode == .horizontal && horizontalOffset > 4
+    }
+
+    private var isSwipingLeft: Bool {
+        dragMode == .horizontal && horizontalOffset < -4
+    }
+
+    private var toggleActionIcon: String {
+        isCompleted ? "arrow.uturn.backward" : "checkmark"
+    }
+
+    private var toggleActionTint: Color {
+        isCompleted
+            ? Color(red: 0.45, green: 0.55, blue: 0.85)
+            : Color(red: 0.36, green: 0.66, blue: 0.46)
+    }
+
+    private static let archiveActionTint = Color(red: 0.58, green: 0.45, blue: 0.78)
 
     private var displayTitle: String {
         if isSummarizing {
@@ -789,11 +812,12 @@ private struct TaskRow: View {
                 Text(displayDescription)
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
+                    .strikethrough(isCompleted)
                     .lineLimit(nil)
                     .fixedSize(horizontal: false, vertical: true)
                     .multilineTextAlignment(.leading)
 
-                SourceBadge(source: task.inputSource)
+                SourceBadge(source: task.inputSource, isCompleted: isCompleted)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
@@ -824,22 +848,22 @@ private struct TaskRow: View {
     private var swipeActions: some View {
         HStack(spacing: 8) {
             ActionRevealView(
-                systemName: "checkmark",
-                tint: Color(red: 0.47, green: 0.74, blue: 0.55),
+                systemName: toggleActionIcon,
+                tint: toggleActionTint,
                 alignment: .leading
             )
-            .opacity(isDraggingHorizontally ? 1 : 0)
+            .opacity(isSwipingRight ? 1 : 0)
 
             Spacer(minLength: 12)
 
             ActionRevealView(
                 systemName: "archivebox",
-                tint: Color(red: 0.38, green: 0.55, blue: 0.76),
+                tint: Self.archiveActionTint,
                 alignment: .trailing
             )
-            .opacity(isDraggingHorizontally ? 1 : 0)
+            .opacity(isSwipingLeft ? 1 : 0)
         }
-        .animation(.easeOut(duration: 0.14), value: isDraggingHorizontally)
+        .animation(.easeOut(duration: 0.14), value: horizontalOffset)
     }
 
     private var rowDragGesture: some Gesture {
@@ -888,7 +912,7 @@ private struct TaskRow: View {
         }
 
         if offset > 72 {
-            onComplete()
+            onToggleComplete()
         } else if offset < -72 {
             onArchive()
         }
@@ -974,11 +998,13 @@ private struct TaskRow: View {
 
 private struct SourceBadge: View {
     let source: TaskInputSource
+    let isCompleted: Bool
 
     var body: some View {
         Text(source.label)
             .font(.system(size: 11, weight: .medium))
             .foregroundStyle(.tertiary)
+            .strikethrough(isCompleted)
     }
 }
 
