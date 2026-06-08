@@ -26,6 +26,7 @@ final class TaskStore: ObservableObject {
 
     private let storeURL: URL
     private let configurationURL: URL
+    private let notesDirectoryURL: URL
     private let visionSummarizer: VisionSummarizing
     private let titleFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -53,6 +54,8 @@ final class TaskStore: ObservableObject {
             let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             self.configurationURL = appSupport.appending(path: "TaskSnap/vision-model.json")
         }
+
+        notesDirectoryURL = self.storeURL.deletingLastPathComponent().appending(path: "notes")
 
         load()
         loadConfiguration()
@@ -262,7 +265,113 @@ final class TaskStore: ObservableObject {
             return false
         }
 
-        tasks[index].noteMarkdown = markdown
+        if let note = tasks[index].notes.first {
+            do {
+                try updateNoteMarkdown(note, markdown: markdown)
+                return true
+            } catch {
+                return false
+            }
+        }
+
+        do {
+            try createLocalNote(for: task, title: task.title, initialMarkdown: markdown)
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    @discardableResult
+    func createLocalNote(for task: TaskItem, title: String, initialMarkdown: String = "") throws -> TaskNote {
+        guard let taskIndex = tasks.firstIndex(where: { $0.id == task.id }) else {
+            throw TaskNoteError.missingTask
+        }
+
+        let normalizedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedTitle.isEmpty else {
+            throw TaskNoteError.emptyTitle
+        }
+
+        let noteDirectory = notesDirectoryURL.appending(path: task.id.uuidString)
+        try FileManager.default.createDirectory(at: noteDirectory, withIntermediateDirectories: true)
+
+        let noteID = UUID()
+        let fileName = "\(Self.safeFileStem(from: normalizedTitle))-\(noteID.uuidString.prefix(8)).md"
+        let fileURL = noteDirectory.appending(path: fileName)
+        try initialMarkdown.write(to: fileURL, atomically: true, encoding: .utf8)
+
+        let titleFromMarkdown = Self.noteTitle(from: initialMarkdown, fileURL: fileURL, fallback: normalizedTitle)
+        let note = TaskNote(
+            id: noteID,
+            title: titleFromMarkdown,
+            kind: .local,
+            filePath: fileURL.path
+        )
+        tasks[taskIndex].notes.append(note)
+        tasks[taskIndex].noteMarkdown = nil
+        return note
+    }
+
+    @discardableResult
+    func attachExternalNote(for task: TaskItem, filePath: String) throws -> TaskNote {
+        guard let taskIndex = tasks.firstIndex(where: { $0.id == task.id }) else {
+            throw TaskNoteError.missingTask
+        }
+
+        let fileURL = try Self.validatedMarkdownFileURL(filePath)
+        let markdown = try readMarkdownFile(at: fileURL)
+        let note = TaskNote(
+            title: Self.noteTitle(from: markdown, fileURL: fileURL, fallback: nil),
+            kind: .external,
+            filePath: fileURL.path
+        )
+        tasks[taskIndex].notes.append(note)
+        tasks[taskIndex].noteMarkdown = nil
+        return note
+    }
+
+    func readNoteMarkdown(_ note: TaskNote) throws -> String {
+        try readMarkdownFile(at: note.fileURL)
+    }
+
+    @discardableResult
+    func updateNoteMarkdown(_ note: TaskNote, markdown: String) throws -> Bool {
+        guard let taskIndex = tasks.firstIndex(where: { $0.notes.contains(where: { $0.id == note.id }) }),
+              let noteIndex = tasks[taskIndex].notes.firstIndex(where: { $0.id == note.id }) else {
+            throw TaskNoteError.missingNote
+        }
+
+        do {
+            try markdown.write(to: note.fileURL, atomically: true, encoding: .utf8)
+        } catch {
+            throw TaskNoteError.unwritableFile
+        }
+
+        tasks[taskIndex].notes[noteIndex].updatedAt = Date()
+        tasks[taskIndex].notes[noteIndex].title = Self.noteTitle(
+            from: markdown,
+            fileURL: note.fileURL,
+            fallback: tasks[taskIndex].notes[noteIndex].title
+        )
+        tasks[taskIndex].noteMarkdown = nil
+        return true
+    }
+
+    @discardableResult
+    func deleteNoteReference(_ note: TaskNote, from task: TaskItem) throws -> Bool {
+        guard let taskIndex = tasks.firstIndex(where: { $0.id == task.id }) else {
+            throw TaskNoteError.missingTask
+        }
+
+        guard let noteIndex = tasks[taskIndex].notes.firstIndex(where: { $0.id == note.id }) else {
+            throw TaskNoteError.missingNote
+        }
+
+        let removed = tasks[taskIndex].notes.remove(at: noteIndex)
+        if removed.kind == .local {
+            try? FileManager.default.removeItem(at: removed.fileURL)
+        }
         return true
     }
 
@@ -280,6 +389,7 @@ final class TaskStore: ObservableObject {
         do {
             let data = try Data(contentsOf: storeURL)
             tasks = try JSONDecoder().decode([TaskItem].self, from: data)
+            migrateLegacyInlineNotesIfNeeded()
         } catch {
             tasks = []
         }
@@ -348,6 +458,127 @@ final class TaskStore: ObservableObject {
         }
 
         tasks[index].title = normalizedTitle
+    }
+
+    private func migrateLegacyInlineNotesIfNeeded() {
+        var migratedTasks = tasks
+        var didMigrate = false
+
+        for index in migratedTasks.indices {
+            guard
+                migratedTasks[index].notes.isEmpty,
+                let markdown = migratedTasks[index].noteMarkdown,
+                !markdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            else {
+                continue
+            }
+
+            do {
+                let task = migratedTasks[index]
+                let noteDirectory = notesDirectoryURL.appending(path: task.id.uuidString)
+                try FileManager.default.createDirectory(at: noteDirectory, withIntermediateDirectories: true)
+                let noteID = UUID()
+                let fallbackTitle = task.title
+                let fileName = "\(Self.safeFileStem(from: fallbackTitle))-\(noteID.uuidString.prefix(8)).md"
+                let fileURL = noteDirectory.appending(path: fileName)
+                try markdown.write(to: fileURL, atomically: true, encoding: .utf8)
+                migratedTasks[index].notes = [
+                    TaskNote(
+                        id: noteID,
+                        title: Self.noteTitle(from: markdown, fileURL: fileURL, fallback: fallbackTitle),
+                        kind: .local,
+                        filePath: fileURL.path,
+                        createdAt: task.createdAt,
+                        updatedAt: Date()
+                    )
+                ]
+                migratedTasks[index].noteMarkdown = nil
+                didMigrate = true
+            } catch {
+                assertionFailure("Failed to migrate legacy note: \(error)")
+            }
+        }
+
+        if didMigrate {
+            tasks = migratedTasks
+        }
+    }
+
+    private func readMarkdownFile(at url: URL) throws -> String {
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            throw TaskNoteError.fileDoesNotExist
+        }
+
+        do {
+            return try String(contentsOf: url, encoding: .utf8)
+        } catch {
+            throw TaskNoteError.unreadableFile
+        }
+    }
+
+    private static func validatedMarkdownFileURL(_ filePath: String) throws -> URL {
+        let normalized = filePath.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else {
+            throw TaskNoteError.emptyPath
+        }
+
+        let url = URL(fileURLWithPath: NSString(string: normalized).expandingTildeInPath)
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            throw TaskNoteError.fileDoesNotExist
+        }
+
+        let fileExtension = url.pathExtension.lowercased()
+        guard fileExtension == "md" || fileExtension == "markdown" else {
+            throw TaskNoteError.unsupportedFileType
+        }
+
+        return url
+    }
+
+    private static func safeFileStem(from title: String) -> String {
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_"))
+        let scalars = title
+            .lowercased()
+            .unicodeScalars
+            .map { allowed.contains($0) ? Character($0) : "-" }
+        let compact = String(scalars)
+            .split(separator: "-")
+            .joined(separator: "-")
+            .trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+        return compact.isEmpty ? "note" : String(compact.prefix(48))
+    }
+
+    private static func noteTitle(from markdown: String, fileURL: URL, fallback: String?) -> String {
+        if let heading = firstHeading(in: markdown) {
+            return heading
+        }
+
+        let normalizedFallback = fallback?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !normalizedFallback.isEmpty {
+            return normalizedFallback
+        }
+
+        let fileStem = fileURL.deletingPathExtension().lastPathComponent
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if !fileStem.isEmpty {
+            return fileStem
+        }
+
+        return "未命名笔记"
+    }
+
+    private static func firstHeading(in markdown: String) -> String? {
+        for line in markdown.split(separator: "\n", omittingEmptySubsequences: false) {
+            let trimmed = String(line).trimmingCharacters(in: .whitespaces)
+            guard trimmed.hasPrefix("#") else { continue }
+            let markers = trimmed.prefix { $0 == "#" }
+            guard (1...2).contains(markers.count) else { continue }
+            let title = trimmed.dropFirst(markers.count).trimmingCharacters(in: .whitespaces)
+            if !title.isEmpty {
+                return title
+            }
+        }
+        return nil
     }
 }
 

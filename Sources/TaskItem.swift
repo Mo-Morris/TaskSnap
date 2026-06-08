@@ -11,6 +11,7 @@ struct TaskItem: Identifiable, Codable, Equatable {
     var inputSource: TaskInputSource
     var manualIconName: String?
     var noteMarkdown: String?
+    var notes: [TaskNote]
 
     var isDone: Bool {
         status == .completed
@@ -28,6 +29,7 @@ struct TaskItem: Identifiable, Codable, Equatable {
         case inputSource
         case manualIconName
         case noteMarkdown
+        case notes
     }
 
     init(
@@ -41,7 +43,8 @@ struct TaskItem: Identifiable, Codable, Equatable {
         backgroundColorHex: String = TaskItem.randomLightColorHex(),
         inputSource: TaskInputSource = .screenshot,
         manualIconName: String? = nil,
-        noteMarkdown: String? = nil
+        noteMarkdown: String? = nil,
+        notes: [TaskNote] = []
     ) {
         self.id = id
         self.title = title
@@ -53,6 +56,7 @@ struct TaskItem: Identifiable, Codable, Equatable {
         self.inputSource = inputSource
         self.manualIconName = manualIconName
         self.noteMarkdown = noteMarkdown
+        self.notes = notes
     }
 
     init(from decoder: Decoder) throws {
@@ -71,6 +75,7 @@ struct TaskItem: Identifiable, Codable, Equatable {
         manualIconName = try container.decodeIfPresent(String.self, forKey: .manualIconName)
             ?? (inputSource == .manual ? TaskItem.randomManualIconName() : nil)
         noteMarkdown = try container.decodeIfPresent(String.self, forKey: .noteMarkdown)
+        notes = try container.decodeIfPresent([TaskNote].self, forKey: .notes) ?? []
     }
 
     func encode(to encoder: Encoder) throws {
@@ -84,7 +89,7 @@ struct TaskItem: Identifiable, Codable, Equatable {
         try container.encode(backgroundColorHex, forKey: .backgroundColorHex)
         try container.encode(inputSource, forKey: .inputSource)
         try container.encodeIfPresent(manualIconName, forKey: .manualIconName)
-        try container.encodeIfPresent(noteMarkdown, forKey: .noteMarkdown)
+        try container.encode(notes, forKey: .notes)
     }
 
     static func randomLightColorHex() -> String {

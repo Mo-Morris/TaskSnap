@@ -244,15 +244,28 @@ struct ArchiveWindowView: View {
     }
 
     private func noteSection(for task: TaskItem) -> some View {
-        let markdown = task.noteMarkdown?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let firstNote = task.notes.first
+        let markdown = firstNote.flatMap { try? store.readNoteMarkdown($0) }?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
 
         return VStack(alignment: .leading, spacing: 8) {
-            Text("任务笔记")
+            Text(task.notes.count > 1 ? "任务笔记（\(task.notes.count) 篇，预览第一篇）" : "任务笔记")
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(.secondary)
 
-            if markdown.isEmpty {
+            if firstNote == nil {
                 Text("这项任务没有保存笔记。")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.tertiary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(16)
+                    .background(Color(nsColor: .controlBackgroundColor).opacity(0.42))
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .stroke(Color.black.opacity(0.08), lineWidth: 1)
+                    }
+            } else if markdown.isEmpty {
+                Text("第一篇笔记为空，或文件暂时无法读取。")
                     .font(.system(size: 13))
                     .foregroundStyle(.tertiary)
                     .frame(maxWidth: .infinity, alignment: .leading)

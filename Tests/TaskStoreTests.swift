@@ -129,7 +129,7 @@ import Testing
 }
 
 @MainActor
-@Test func taskStoreUpdatesAndPersistsTaskNotes() {
+@Test func taskStoreUpdatesAndPersistsTaskNotes() throws {
     let urls = temporaryStoreURLs()
     let store = TaskStore(storeURL: urls.tasks, configurationURL: urls.configuration)
 
@@ -145,14 +145,19 @@ import Testing
     )
 
     let reloadedStore = TaskStore(storeURL: urls.tasks, configurationURL: urls.configuration)
+    let storedMarkdown = try store.readNoteMarkdown(store.tasks[0].notes[0])
+    let reloadedMarkdown = try reloadedStore.readNoteMarkdown(reloadedStore.tasks[0].notes[0])
 
     #expect(didUpdate == true)
-    #expect(store.tasks[0].noteMarkdown?.contains("上线前确认清单") == true)
-    #expect(reloadedStore.tasks[0].noteMarkdown == store.tasks[0].noteMarkdown)
+    #expect(store.tasks[0].noteMarkdown == nil)
+    #expect(store.tasks[0].notes.count == 1)
+    #expect(storedMarkdown.contains("上线前确认清单") == true)
+    #expect(reloadedStore.tasks[0].notes == store.tasks[0].notes)
+    #expect(reloadedMarkdown == storedMarkdown)
 }
 
 @MainActor
-@Test func taskStoreAllowsClearingTaskNotes() {
+@Test func taskStoreAllowsClearingTaskNotes() throws {
     let urls = temporaryStoreURLs()
     let store = TaskStore(storeURL: urls.tasks, configurationURL: urls.configuration)
 
@@ -162,7 +167,86 @@ import Testing
     let didClear = store.updateTaskNote(store.tasks[0], markdown: "")
 
     #expect(didClear == true)
-    #expect(store.tasks[0].noteMarkdown == "")
+    #expect(try store.readNoteMarkdown(store.tasks[0].notes[0]) == "")
+}
+
+@MainActor
+@Test func taskStoreCreatesMultipleLocalNotesForOneTask() throws {
+    let urls = temporaryStoreURLs()
+    let store = TaskStore(storeURL: urls.tasks, configurationURL: urls.configuration)
+
+    _ = store.addManualTask(title: "确认上线计划", description: "记录发布窗口和回滚预案")
+
+    let first = try store.createLocalNote(for: store.tasks[0], title: "发布清单", initialMarkdown: "## 发布清单")
+    let second = try store.createLocalNote(for: store.tasks[0], title: "回滚预案", initialMarkdown: "## 回滚预案")
+
+    #expect(store.tasks[0].notes.count == 2)
+    #expect(first.kind == .local)
+    #expect(second.kind == .local)
+    #expect(first.filePath != second.filePath)
+    #expect(try store.readNoteMarkdown(first) == "## 发布清单")
+    #expect(try store.readNoteMarkdown(second) == "## 回滚预案")
+}
+
+@MainActor
+@Test func taskStoreAttachesExternalMarkdownAndWritesOriginalFile() throws {
+    let urls = temporaryStoreURLs()
+    let store = TaskStore(storeURL: urls.tasks, configurationURL: urls.configuration)
+    let externalURL = urls.tasks.deletingLastPathComponent().appending(path: "external-note.md")
+    try FileManager.default.createDirectory(at: externalURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try "## 外部笔记\n原始内容".write(to: externalURL, atomically: true, encoding: .utf8)
+
+    _ = store.addManualTask(title: "确认上线计划", description: "记录发布窗口和回滚预案")
+
+    let note = try store.attachExternalNote(for: store.tasks[0], filePath: externalURL.path)
+    try store.updateNoteMarkdown(note, markdown: "## 外部笔记\n已更新")
+
+    #expect(note.kind == .external)
+    #expect(store.tasks[0].notes.count == 1)
+    #expect(try String(contentsOf: externalURL, encoding: .utf8) == "## 外部笔记\n已更新")
+}
+
+@MainActor
+@Test func taskStoreRejectsInvalidExternalMarkdownPaths() throws {
+    let urls = temporaryStoreURLs()
+    let store = TaskStore(storeURL: urls.tasks, configurationURL: urls.configuration)
+    let textURL = urls.tasks.deletingLastPathComponent().appending(path: "not-markdown.txt")
+    try FileManager.default.createDirectory(at: textURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try "不是 markdown".write(to: textURL, atomically: true, encoding: .utf8)
+
+    _ = store.addManualTask(title: "确认上线计划", description: "记录发布窗口和回滚预案")
+
+    #expect(throws: TaskNoteError.emptyPath) {
+        try store.attachExternalNote(for: store.tasks[0], filePath: " ")
+    }
+    #expect(throws: TaskNoteError.fileDoesNotExist) {
+        try store.attachExternalNote(for: store.tasks[0], filePath: urls.tasks.deletingLastPathComponent().appending(path: "missing.md").path)
+    }
+    #expect(throws: TaskNoteError.unsupportedFileType) {
+        try store.attachExternalNote(for: store.tasks[0], filePath: textURL.path)
+    }
+    #expect(store.tasks[0].notes.isEmpty)
+}
+
+@MainActor
+@Test func taskStoreDeletesNoteReferencesByKind() throws {
+    let urls = temporaryStoreURLs()
+    let store = TaskStore(storeURL: urls.tasks, configurationURL: urls.configuration)
+    let externalURL = urls.tasks.deletingLastPathComponent().appending(path: "external-note.md")
+    try FileManager.default.createDirectory(at: externalURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try "## 外部笔记".write(to: externalURL, atomically: true, encoding: .utf8)
+
+    _ = store.addManualTask(title: "确认上线计划", description: "记录发布窗口和回滚预案")
+    let local = try store.createLocalNote(for: store.tasks[0], title: "本地笔记", initialMarkdown: "## 本地笔记")
+    let external = try store.attachExternalNote(for: store.tasks[0], filePath: externalURL.path)
+
+    try store.deleteNoteReference(external, from: store.tasks[0])
+    #expect(FileManager.default.fileExists(atPath: externalURL.path))
+    #expect(store.tasks[0].notes.count == 1)
+
+    try store.deleteNoteReference(local, from: store.tasks[0])
+    #expect(!FileManager.default.fileExists(atPath: local.filePath))
+    #expect(store.tasks[0].notes.isEmpty)
 }
 
 @MainActor
@@ -271,6 +355,36 @@ import Testing
     #expect(store.tasks.count == 1)
     #expect(store.tasks[0].status == .completed)
     #expect(store.visibleTasks.count == 1)
+}
+
+@MainActor
+@Test func taskStoreMigratesLegacyInlineMarkdownToLocalNoteFile() throws {
+    let urls = temporaryStoreURLs()
+    try writeLegacyTasksJSON(
+        """
+        [
+          {
+            "id": "33333333-3333-3333-3333-333333333333",
+            "title": "旧笔记任务",
+            "createdAt": 0,
+            "status": "active",
+            "noteMarkdown": "## 旧笔记\\n- 迁移到文件"
+          }
+        ]
+        """,
+        to: urls.tasks
+    )
+
+    let store = TaskStore(storeURL: urls.tasks, configurationURL: urls.configuration)
+    let reloadedStore = TaskStore(storeURL: urls.tasks, configurationURL: urls.configuration)
+    let migratedMarkdown = try store.readNoteMarkdown(store.tasks[0].notes[0])
+
+    #expect(store.tasks.count == 1)
+    #expect(store.tasks[0].noteMarkdown == nil)
+    #expect(store.tasks[0].notes.count == 1)
+    #expect(store.tasks[0].notes[0].kind == .local)
+    #expect(migratedMarkdown.contains("迁移到文件") == true)
+    #expect(reloadedStore.tasks[0].notes == store.tasks[0].notes)
 }
 
 @MainActor

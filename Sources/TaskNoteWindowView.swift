@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct TaskNoteWindowView: View {
     @ObservedObject var store: TaskStore
@@ -8,6 +9,10 @@ struct TaskNoteWindowView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var displayMode: NoteDisplayMode = .preview
     @State private var editingTask: TaskItem?
+    @State private var selectedNoteID: TaskNote.ID?
+    @State private var noteMarkdown = ""
+    @State private var noteErrorMessage: String?
+    @State private var noteCreationTask: TaskItem?
     @State private var isTaskSidebarCollapsed = false
     @State private var isOutlineVisible = true
     @FocusState private var isEditorFocused: Bool
@@ -24,12 +29,31 @@ struct TaskNoteWindowView: View {
         return visibleTasks.first { $0.id == selectedTaskID } ?? visibleTasks.first
     }
 
+    private var selectedNote: TaskNote? {
+        guard let selectedTask else {
+            return nil
+        }
+
+        if let selectedNoteID,
+           let note = selectedTask.notes.first(where: { $0.id == selectedNoteID }) {
+            return note
+        }
+
+        return selectedTask.notes.first
+    }
+
     private var noteMarkdownBinding: Binding<String> {
         Binding {
-            selectedTask?.noteMarkdown ?? ""
+            noteMarkdown
         } set: { newValue in
-            guard let selectedTask else { return }
-            store.updateTaskNote(selectedTask, markdown: newValue)
+            noteMarkdown = newValue
+            guard let selectedNote else { return }
+            do {
+                try store.updateNoteMarkdown(selectedNote, markdown: newValue)
+                noteErrorMessage = nil
+            } catch {
+                noteErrorMessage = error.localizedDescription
+            }
         }
     }
 
@@ -46,14 +70,28 @@ struct TaskNoteWindowView: View {
             if selectedTaskID == nil {
                 selectedTaskID = visibleTasks.first?.id
             }
-            updateModeForSelectedTask()
+            selectDefaultNoteIfNeeded()
+            loadSelectedNote()
         }
         .onChange(of: selectedTaskID) {
-            updateModeForSelectedTask()
+            selectDefaultNoteIfNeeded(force: true)
+            loadSelectedNote()
+        }
+        .onChange(of: selectedNoteID) {
+            loadSelectedNote()
+        }
+        .onChange(of: visibleTasks.map { "\($0.id):\($0.notes.map(\.id))" }) {
+            selectDefaultNoteIfNeeded()
+            loadSelectedNote()
         }
         .sheet(item: $editingTask) { task in
             NoteTaskEditFormView(task: task) { title, description in
                 store.updateTask(task, title: title, description: description)
+            }
+        }
+        .sheet(item: $noteCreationTask) { task in
+            NoteCreationFormView(task: task) { title in
+                createLocalNote(for: task, title: title)
             }
         }
     }
@@ -100,10 +138,27 @@ struct TaskNoteWindowView: View {
                     ForEach(visibleTasks) { task in
                         TaskTitleListItem(
                             task: task,
-                            isSelected: task.id == selectedTask?.id
-                        ) {
-                            selectedTaskID = task.id
-                        }
+                            selectedNoteID: selectedNoteID,
+                            isSelected: task.id == selectedTask?.id,
+                            noteExists: noteExists,
+                            onSelectTask: {
+                                selectedTaskID = task.id
+                                selectedNoteID = task.notes.first?.id
+                            },
+                            onSelectNote: { note in
+                                selectedTaskID = task.id
+                                selectedNoteID = note.id
+                            },
+                            onCreateNote: {
+                                noteCreationTask = task
+                            },
+                            onAttachExternalNote: {
+                                chooseExternalNote(for: task)
+                            },
+                            onDeleteNote: { note in
+                                deleteNote(note, from: task)
+                            }
+                        )
                     }
                 }
                 .padding(.bottom, 18)
@@ -155,7 +210,7 @@ struct TaskNoteWindowView: View {
     private var documentPane: some View {
         if let selectedTask {
             VStack(spacing: 0) {
-                documentTitleBar(for: selectedTask)
+                documentTitleBar(for: selectedTask, note: selectedNote)
 
                 Divider()
 
@@ -168,14 +223,14 @@ struct TaskNoteWindowView: View {
         }
     }
 
-    private func documentTitleBar(for task: TaskItem) -> some View {
+    private func documentTitleBar(for task: TaskItem, note: TaskNote?) -> some View {
         HStack(spacing: 16) {
             VStack(alignment: .leading, spacing: 3) {
-                Text(TaskNoteDocument(markdown: task.noteMarkdown, fallbackTitle: task.title).title)
+                Text(note.map { TaskNoteDocument(markdown: noteMarkdown, fallbackTitle: $0.title).title } ?? "任务笔记")
                     .font(.system(size: 15, weight: .semibold))
                     .lineLimit(1)
 
-                Text("\(TaskDisplayText(task: task).title) · 自动保存")
+                Text(note.map { "\(TaskDisplayText(task: task).title) · \($0.kind.label) · 自动保存" } ?? "\(TaskDisplayText(task: task).title) · 还没有笔记")
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -183,8 +238,9 @@ struct TaskNoteWindowView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
 
             NoteToolbarButton(systemName: "doc.on.doc", help: "复制 Markdown") {
-                copyToPasteboard(task.noteMarkdown ?? "")
+                copyToPasteboard(noteMarkdown)
             }
+            .disabled(note == nil)
 
             NoteToolbarButton(
                 systemName: isOutlineVisible ? "list.bullet.rectangle.fill" : "list.bullet.rectangle",
@@ -199,6 +255,7 @@ struct TaskNoteWindowView: View {
             }
             .pickerStyle(.segmented)
             .frame(width: 166)
+            .disabled(note == nil)
         }
         .padding(.leading, 52)
         .padding(.trailing, 18)
@@ -208,34 +265,51 @@ struct TaskNoteWindowView: View {
 
     @ViewBuilder
     private func documentContent(for task: TaskItem) -> some View {
-        let document = TaskNoteDocument(markdown: task.noteMarkdown, fallbackTitle: task.title)
+        if let selectedNote {
+            let document = TaskNoteDocument(markdown: noteMarkdown, fallbackTitle: selectedNote.title)
 
-        switch displayMode {
-        case .preview:
-            if document.previewMarkdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 18) {
-                        emptyNoteView
+            VStack(spacing: 0) {
+                if let noteErrorMessage {
+                    Text(noteErrorMessage)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.red)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 52)
+                        .padding(.vertical, 10)
+                        .background(Color.red.opacity(0.08))
+                }
+
+                switch displayMode {
+                case .preview:
+                    if document.previewMarkdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        ScrollView {
+                            VStack(alignment: .leading, spacing: 18) {
+                                emptyNoteView
+                            }
+                            .frame(maxWidth: 840, alignment: .leading)
+                            .padding(.horizontal, 52)
+                            .padding(.vertical, 30)
+                            .frame(maxWidth: .infinity, alignment: .top)
+                        }
+                    } else {
+                        MarkdownPreviewView(markdown: document.previewMarkdown, isOutlineVisible: isOutlineVisible)
                     }
-                    .frame(maxWidth: 840, alignment: .leading)
-                    .padding(.horizontal, 52)
-                    .padding(.vertical, 30)
-                    .frame(maxWidth: .infinity, alignment: .top)
+                case .markdown:
+                    TextEditor(text: noteMarkdownBinding)
+                        .font(.system(size: 14, design: .monospaced))
+                        .scrollContentBackground(.hidden)
+                        .padding(.horizontal, 44)
+                        .padding(.vertical, 22)
+                        .background(Color(nsColor: .textBackgroundColor))
+                        .focused($isEditorFocused)
+                        .disabled(noteErrorMessage != nil && noteMarkdown.isEmpty)
+                        .onAppear {
+                            isEditorFocused = true
+                        }
                 }
-            } else {
-                MarkdownPreviewView(markdown: document.previewMarkdown, isOutlineVisible: isOutlineVisible)
             }
-        case .markdown:
-            TextEditor(text: noteMarkdownBinding)
-                .font(.system(size: 14, design: .monospaced))
-                .scrollContentBackground(.hidden)
-                .padding(.horizontal, 44)
-                .padding(.vertical, 22)
-                .background(Color(nsColor: .textBackgroundColor))
-                .focused($isEditorFocused)
-                .onAppear {
-                    isEditorFocused = true
-                }
+        } else {
+            emptyTaskNotesView(for: task)
         }
     }
 
@@ -257,6 +331,43 @@ struct TaskNoteWindowView: View {
         .foregroundStyle(.secondary)
     }
 
+    private func emptyTaskNotesView(for task: TaskItem) -> some View {
+        VStack(spacing: 14) {
+            Image(systemName: "doc.badge.plus")
+                .font(.system(size: 36, weight: .medium))
+                .foregroundStyle(.secondary)
+
+            Text("这个任务还没有笔记")
+                .font(.headline)
+
+            if let noteErrorMessage {
+                Text(noteErrorMessage)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.red)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 420)
+            }
+
+            HStack(spacing: 10) {
+                Button {
+                    noteCreationTask = task
+                } label: {
+                    Label("新建笔记", systemImage: "square.and.pencil")
+                }
+                .buttonStyle(.borderedProminent)
+
+                Button {
+                    chooseExternalNote(for: task)
+                } label: {
+                    Label("关联 md 文件", systemImage: "link")
+                }
+                .buttonStyle(.bordered)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .foregroundStyle(.secondary)
+    }
+
     private var emptyWindow: some View {
         VStack(spacing: 14) {
             Image(systemName: "doc.text.magnifyingglass")
@@ -274,9 +385,93 @@ struct TaskNoteWindowView: View {
         .padding(28)
     }
 
-    private func updateModeForSelectedTask() {
-        let markdown = selectedTask?.noteMarkdown?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    private func selectDefaultNoteIfNeeded(force: Bool = false) {
+        guard let selectedTask else {
+            selectedNoteID = nil
+            return
+        }
+
+        if force || selectedNoteID == nil || !selectedTask.notes.contains(where: { $0.id == selectedNoteID }) {
+            selectedNoteID = selectedTask.notes.first?.id
+        }
+    }
+
+    private func loadSelectedNote() {
+        guard let selectedNote else {
+            noteMarkdown = ""
+            noteErrorMessage = nil
+            displayMode = .markdown
+            return
+        }
+
+        do {
+            noteMarkdown = try store.readNoteMarkdown(selectedNote)
+            noteErrorMessage = nil
+        } catch {
+            noteMarkdown = ""
+            noteErrorMessage = error.localizedDescription
+        }
+
         displayMode = markdown.isEmpty ? .markdown : .preview
+    }
+
+    private var markdown: String {
+        noteMarkdown.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func createLocalNote(for task: TaskItem, title: String) {
+        do {
+            let note = try store.createLocalNote(for: task, title: title, initialMarkdown: "# \(title)\n")
+            selectedTaskID = task.id
+            selectedNoteID = note.id
+            noteErrorMessage = nil
+        } catch {
+            noteErrorMessage = error.localizedDescription
+        }
+    }
+
+    private func chooseExternalNote(for task: TaskItem) {
+        let panel = NSOpenPanel()
+        panel.title = "选择 Markdown 文件"
+        panel.prompt = "关联"
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = ["md", "markdown"].compactMap { UTType(filenameExtension: $0) }
+
+        guard panel.runModal() == .OK, let url = panel.url else {
+            return
+        }
+
+        attachExternalNote(for: task, filePath: url.path)
+    }
+
+    private func attachExternalNote(for task: TaskItem, filePath: String) {
+        do {
+            let note = try store.attachExternalNote(for: task, filePath: filePath)
+            selectedTaskID = task.id
+            selectedNoteID = note.id
+            noteErrorMessage = nil
+        } catch {
+            noteErrorMessage = error.localizedDescription
+        }
+    }
+
+    private func deleteNote(_ note: TaskNote, from task: TaskItem) {
+        do {
+            try store.deleteNoteReference(note, from: task)
+            selectedTaskID = task.id
+            if selectedNoteID == note.id {
+                selectedNoteID = visibleTasks.first(where: { $0.id == task.id })?.notes.first?.id
+            }
+            noteErrorMessage = nil
+        } catch {
+            noteErrorMessage = error.localizedDescription
+        }
+    }
+
+    private func noteExists(_ note: TaskNote) -> Bool {
+        FileManager.default.fileExists(atPath: note.filePath)
     }
 
     private func copyToPasteboard(_ text: String) {
@@ -287,52 +482,143 @@ struct TaskNoteWindowView: View {
 
 private struct TaskTitleListItem: View {
     let task: TaskItem
+    let selectedNoteID: TaskNote.ID?
     let isSelected: Bool
-    let action: () -> Void
+    let noteExists: (TaskNote) -> Bool
+    let onSelectTask: () -> Void
+    let onSelectNote: (TaskNote) -> Void
+    let onCreateNote: () -> Void
+    let onAttachExternalNote: () -> Void
+    let onDeleteNote: (TaskNote) -> Void
 
     var body: some View {
-        Button(action: action) {
-            VStack(alignment: .leading, spacing: 7) {
-                Text(TaskDisplayText(task: task).title)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
+        VStack(alignment: .leading, spacing: 8) {
+            Button(action: onSelectTask) {
+                VStack(alignment: .leading, spacing: 7) {
+                    Text(TaskDisplayText(task: task).title)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
 
-                Text(statusText)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 12)
-            .frame(maxWidth: .infinity, minHeight: 72, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(isSelected ? Color(hex: task.backgroundColorHex).opacity(0.36) : Color.white.opacity(0.62))
-            )
-            .overlay(alignment: .leading) {
-                if isSelected {
-                    RoundedRectangle(cornerRadius: 2, style: .continuous)
-                        .fill(Color.accentColor.opacity(0.72))
-                        .frame(width: 3)
-                        .padding(.vertical, 8)
+                    Text(statusText)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
+                .frame(maxWidth: .infinity, minHeight: 72, alignment: .leading)
+                .background(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(isSelected ? Color(hex: task.backgroundColorHex).opacity(0.36) : Color.white.opacity(0.62))
+                )
+                .overlay(alignment: .leading) {
+                    if isSelected {
+                        RoundedRectangle(cornerRadius: 2, style: .continuous)
+                            .fill(Color.accentColor.opacity(0.72))
+                            .frame(width: 3)
+                            .padding(.vertical, 8)
+                    }
+                }
+                .overlay {
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(isSelected ? Color.accentColor.opacity(0.32) : Color.black.opacity(0.08), lineWidth: 1)
                 }
             }
-            .overlay {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .stroke(isSelected ? Color.accentColor.opacity(0.32) : Color.black.opacity(0.08), lineWidth: 1)
+            .buttonStyle(.plain)
+            .pointingHandCursor()
+            .contextMenu {
+                Button(action: onCreateNote) {
+                    Label("新建笔记", systemImage: "square.and.pencil")
+                }
+
+                Button(action: onAttachExternalNote) {
+                    Label("关联 md 文件", systemImage: "link")
+                }
+            }
+
+            if isSelected {
+                VStack(alignment: .leading, spacing: 5) {
+                    ForEach(task.notes) { note in
+                        NoteListItem(
+                            note: note,
+                            isSelected: note.id == selectedNoteID,
+                            exists: noteExists(note)
+                        ) {
+                            onSelectNote(note)
+                        } onDelete: {
+                            onDeleteNote(note)
+                        }
+                    }
+                }
+                .padding(.leading, 8)
+                .contextMenu {
+                    Button(action: onCreateNote) {
+                        Label("新建笔记", systemImage: "square.and.pencil")
+                    }
+
+                    Button(action: onAttachExternalNote) {
+                        Label("关联 md 文件", systemImage: "link")
+                    }
+                }
             }
         }
-        .buttonStyle(.plain)
-        .pointingHandCursor()
     }
 
     private var statusText: String {
-        let noteState = (task.noteMarkdown?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false)
-            ? "已关联笔记"
-            : "空笔记"
+        let noteCount = task.notes.count
+        let noteState = noteCount > 0 ? "\(noteCount) 篇笔记" : "空笔记"
         let doneState = task.status == .completed ? "已完成" : "进行中"
         return "\(noteState) · \(doneState)"
+    }
+}
+
+private struct NoteListItem: View {
+    let note: TaskNote
+    let isSelected: Bool
+    let exists: Bool
+    let action: () -> Void
+    let onDelete: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 7) {
+                Image(systemName: note.kind == .local ? "doc.text" : "link")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(exists ? .secondary : .red)
+                    .frame(width: 14)
+
+                Text(note.title)
+                    .font(.system(size: 12, weight: isSelected ? .semibold : .regular))
+                    .foregroundColor(exists ? .primary : .red)
+                    .lineLimit(1)
+
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .background(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(isSelected ? Color.accentColor.opacity(0.1) : Color.clear)
+            )
+        }
+        .buttonStyle(.plain)
+        .pointingHandCursor()
+        .help(exists ? note.filePath : "文件不存在：\(note.filePath)")
+        .contextMenu {
+            Button(role: .destructive, action: onDelete) {
+                Label(deleteLabel, systemImage: note.kind == .local ? "trash" : "link.badge.minus")
+            }
+        }
+    }
+
+    private var deleteLabel: String {
+        switch note.kind {
+        case .local:
+            "删除笔记"
+        case .external:
+            "解除关联"
+        }
     }
 }
 
@@ -358,6 +644,78 @@ private struct NoteToolbarButton: View {
         .pointingHandCursor()
         .help(help)
         .accessibilityLabel(help)
+    }
+}
+
+private struct NoteCreationFormView: View {
+    let task: TaskItem
+    let onCreate: (String) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var title: String
+    @FocusState private var isTitleFocused: Bool
+
+    init(task: TaskItem, onCreate: @escaping (String) -> Void) {
+        self.task = task
+        self.onCreate = onCreate
+        _title = State(initialValue: TaskDisplayText(task: task).title)
+    }
+
+    private var canCreate: Bool {
+        !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            HStack {
+                Text("新建笔记")
+                    .font(.system(size: 22, weight: .bold))
+
+                Spacer()
+
+                Button {
+                    dismiss()
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.title2)
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("关闭")
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("笔记标题")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.secondary)
+
+                TextField("例如：上线排查记录", text: $title)
+                    .textFieldStyle(.roundedBorder)
+                    .focused($isTitleFocused)
+            }
+
+            HStack(spacing: 12) {
+                Spacer()
+
+                Button("取消") {
+                    dismiss()
+                }
+                .keyboardShortcut(.cancelAction)
+
+                Button("创建") {
+                    onCreate(title)
+                    dismiss()
+                }
+                .keyboardShortcut(.defaultAction)
+                .buttonStyle(.borderedProminent)
+                .disabled(!canCreate)
+            }
+        }
+        .padding(26)
+        .frame(width: 420)
+        .onAppear {
+            isTitleFocused = true
+        }
     }
 }
 
