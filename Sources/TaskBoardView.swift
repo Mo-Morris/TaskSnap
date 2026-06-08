@@ -1450,6 +1450,7 @@ private struct ImagePreviewView: View {
 struct VisionModelSettingsView: View {
     @ObservedObject var store: TaskStore
     @Environment(\.dismiss) private var dismiss
+    @AppStorage(AppTheme.storageKey) private var themeRawValue = AppTheme.light.rawValue
 
     @State private var isShowingVisionConfiguration = false
     @State private var endpoint: String
@@ -1489,6 +1490,10 @@ struct VisionModelSettingsView: View {
         VStack(alignment: .leading, spacing: 0) {
             settingsHeader(title: "设置", subtitle: "管理 TaskSnap 的截图、任务和模型行为。")
                 .padding(.bottom, 18)
+
+            SettingsDivider()
+
+            SettingsThemeRow(themeRawValue: $themeRawValue)
 
             SettingsDivider()
 
@@ -1619,6 +1624,43 @@ struct VisionModelSettingsView: View {
 
             isTesting = false
         }
+    }
+}
+
+private struct SettingsThemeRow: View {
+    @Binding var themeRawValue: String
+
+    var body: some View {
+        HStack(spacing: 16) {
+            Image(systemName: "circle.lefthalf.filled")
+                .font(.title3)
+                .foregroundStyle(SettingsPalette.accent)
+                .frame(width: 36, height: 36)
+                .background(SettingsPalette.controlBackground)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+
+            VStack(alignment: .leading, spacing: 5) {
+                Text("主题")
+                    .font(.body.weight(.medium))
+                    .foregroundStyle(SettingsPalette.primaryText)
+
+                Text("切换 TaskSnap 的浅色或深色外观。")
+                    .font(.caption)
+                    .foregroundStyle(SettingsPalette.secondaryText)
+            }
+
+            Spacer(minLength: 16)
+
+            Picker("主题", selection: $themeRawValue) {
+                ForEach(AppTheme.allCases) { theme in
+                    Text(theme.localizedTitle).tag(theme.rawValue)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(width: 156)
+        }
+        .padding(.vertical, 20)
     }
 }
 

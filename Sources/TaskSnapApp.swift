@@ -11,6 +11,7 @@ final class AppShellState: ObservableObject {
 
 struct TaskSnapApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+    @AppStorage(AppTheme.storageKey) private var themeRawValue = AppTheme.light.rawValue
     @StateObject private var store = TaskStore()
     @StateObject private var pasteCommandDispatcher = PasteCommandDispatcher()
     @StateObject private var shellState = AppShellState()
@@ -33,6 +34,7 @@ struct TaskSnapApp: App {
                 WindowConfigurator(isCollapsed: $shellState.isMainWindowCollapsed)
                     .allowsHitTesting(false)
             }
+            .preferredColorScheme(selectedTheme.colorScheme)
             .environmentObject(shellState)
             .onAppear {
                 appDelegate.pasteCommandDispatcher = pasteCommandDispatcher
@@ -59,6 +61,7 @@ struct TaskSnapApp: App {
         Window("任务笔记", id: "task-note") {
             TaskNoteWindowView(store: store, selectedTaskID: $shellState.selectedNoteTaskID)
                 .frame(minWidth: 820, idealWidth: 1180, minHeight: 560, idealHeight: 760)
+                .preferredColorScheme(selectedTheme.colorScheme)
                 .background {
                     NoteWindowConfigurator()
                         .allowsHitTesting(false)
@@ -69,6 +72,7 @@ struct TaskSnapApp: App {
         Window("归档管理", id: "task-archive") {
             ArchiveWindowView(store: store, selectedTaskID: $shellState.selectedArchivedTaskID)
                 .frame(minWidth: 820, idealWidth: 1080, minHeight: 560, idealHeight: 720)
+                .preferredColorScheme(selectedTheme.colorScheme)
         }
         .windowStyle(.hiddenTitleBar)
 
@@ -83,7 +87,12 @@ struct TaskSnapApp: App {
 
         Settings {
             VisionModelSettingsView(store: store)
+                .preferredColorScheme(selectedTheme.colorScheme)
         }
+    }
+
+    private var selectedTheme: AppTheme {
+        AppTheme(rawValue: themeRawValue) ?? .light
     }
 }
 
@@ -137,7 +146,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func refreshActivationPolicy() {
         let hasVisibleDockWindow = NSApp.windows.contains { window in
-            window.isVisible && Self.dockWindowTitles.contains(window.title)
+            (window.isVisible || window.isMiniaturized)
+                && Self.dockWindowTitles.contains(window.title)
         }
 
         if hasVisibleDockWindow {
@@ -148,6 +158,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         } else if NSApp.activationPolicy() != .accessory {
             NSApp.setActivationPolicy(.accessory)
+            // Switching back to .accessory while the app is still the active
+            // application leaves a ghost Dock tile (with the default icon).
+            // Resigning active lets the system drop the Dock icon immediately.
+            NSApp.deactivate()
         }
     }
 
