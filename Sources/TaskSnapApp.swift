@@ -127,11 +127,55 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var pasteEventMonitor: Any?
     private var statusItem: NSStatusItem?
 
+    private static let dockWindowTitles: Set<String> = ["任务笔记", "归档管理"]
+
+    @objc private func documentWindowStateMayHaveChanged(_ notification: Notification) {
+        DispatchQueue.main.async { [weak self] in
+            self?.refreshActivationPolicy()
+        }
+    }
+
+    private func refreshActivationPolicy() {
+        let hasVisibleDockWindow = NSApp.windows.contains { window in
+            window.isVisible && Self.dockWindowTitles.contains(window.title)
+        }
+
+        if hasVisibleDockWindow {
+            if NSApp.activationPolicy() != .regular {
+                NSApp.setActivationPolicy(.regular)
+                NSApp.activate(ignoringOtherApps: true)
+                applyDockIcon()
+            }
+        } else if NSApp.activationPolicy() != .accessory {
+            NSApp.setActivationPolicy(.accessory)
+        }
+    }
+
+    private func applyDockIcon() {
+        let icon = AppIcon.makeImage()
+        NSApp.applicationIconImage = icon
+        DispatchQueue.main.async {
+            NSApp.applicationIconImage = icon
+        }
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.applicationIconImage = AppIcon.makeImage()
         NSApp.setActivationPolicy(.accessory)
         installStatusItem()
         hideMainWindowOnLaunch()
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(documentWindowStateMayHaveChanged(_:)),
+            name: NSWindow.didBecomeKeyNotification,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(documentWindowStateMayHaveChanged(_:)),
+            name: NSWindow.willCloseNotification,
+            object: nil
+        )
         pasteEventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard
                 event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
