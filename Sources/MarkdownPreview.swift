@@ -54,6 +54,76 @@ struct MarkdownPreviewView: View {
     }
 }
 
+// MARK: - Compact task description preview
+
+struct MarkdownDescriptionPreviewView: View {
+    let markdown: String
+    let isCompleted: Bool
+
+    var body: some View {
+        CompactMarkdownTextView(
+            blocks: MarkdownBlockParser.parse(markdown),
+            isCompleted: isCompleted
+        )
+        .allowsHitTesting(false)
+        .fixedSize(horizontal: false, vertical: true)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct CompactMarkdownTextView: NSViewRepresentable {
+    let blocks: [MarkdownBlock]
+    let isCompleted: Bool
+
+    func makeNSView(context: Context) -> NSTextView {
+        let textView = NSTextView(frame: .zero)
+        textView.isEditable = false
+        textView.isSelectable = false
+        textView.isRichText = true
+        textView.drawsBackground = false
+        textView.allowsUndo = false
+        textView.textContainerInset = .zero
+        textView.textContainer?.lineFragmentPadding = 0
+        textView.textContainer?.widthTracksTextView = true
+        textView.textContainer?.heightTracksTextView = false
+        textView.isVerticallyResizable = true
+        textView.isHorizontallyResizable = false
+        textView.linkTextAttributes = [
+            .foregroundColor: NSColor.linkColor,
+            .underlineStyle: NSUnderlineStyle.single.rawValue
+        ]
+        applyContent(to: textView)
+        return textView
+    }
+
+    func updateNSView(_ textView: NSTextView, context: Context) {
+        applyContent(to: textView)
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView textView: NSTextView, context: Context) -> CGSize? {
+        guard let width = proposal.width ?? (textView.bounds.width > 0 ? textView.bounds.width : nil),
+              width > 0,
+              let layoutManager = textView.layoutManager,
+              let textContainer = textView.textContainer
+        else {
+            return nil
+        }
+
+        textView.frame.size.width = width
+        textContainer.containerSize = NSSize(width: width, height: CGFloat.greatestFiniteMagnitude)
+        layoutManager.ensureLayout(for: textContainer)
+
+        let usedRect = layoutManager.usedRect(for: textContainer)
+        let height = ceil(usedRect.height + textView.textContainerInset.height * 2)
+        return CGSize(width: width, height: max(height, 1))
+    }
+
+    private func applyContent(to textView: NSTextView) {
+        textView.textStorage?.setAttributedString(MarkdownCompactAttributedRenderer.render(blocks, isCompleted: isCompleted))
+        textView.invalidateIntrinsicContentSize()
+    }
+}
+
 // MARK: - Outline
 
 private struct MarkdownOutlineItem: Identifiable {
@@ -71,7 +141,7 @@ private struct MarkdownOutlineView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
             Text("大纲")
-                .font(.system(size: 12, weight: .semibold))
+                .font(.custom("PingFang SC", size: 13).weight(.semibold))
                 .foregroundStyle(.secondary)
 
             ForEach(items) { item in
@@ -79,7 +149,8 @@ private struct MarkdownOutlineView: View {
                     onSelect(item)
                 } label: {
                     Text(item.title)
-                        .font(.system(size: outlineFontSize(for: item.level), weight: item.level <= 2 ? .semibold : .regular))
+                        .font(.custom("PingFang SC", size: outlineFontSize(for: item.level))
+                            .weight(item.level <= 2 ? .semibold : .regular))
                         .foregroundStyle(.primary)
                         .lineLimit(2)
                         .multilineTextAlignment(.leading)
@@ -101,7 +172,7 @@ private struct MarkdownOutlineView: View {
     }
 
     private func outlineFontSize(for level: Int) -> CGFloat {
-        level <= 2 ? 12 : 11
+        level <= 2 ? 13 : 12
     }
 }
 
@@ -164,6 +235,7 @@ private struct SelectableMarkdownTextView: NSViewRepresentable {
 
         textView.textStorage?.setAttributedString(rendered.attributedString)
         textView.codeBlocks = rendered.codeBlocks
+        textView.quoteRanges = rendered.quoteRanges
         textView.needsDisplay = true
         context.coordinator.lastRenderedText = rendered.string
         context.coordinator.headingRanges = rendered.headingRanges
@@ -202,14 +274,26 @@ struct MarkdownCodeRange {
 
 // MARK: - Custom text view (continuous code background + copy button)
 
+private final class PointingHandCodeCopyButton: NSButton {
+    override func resetCursorRects() {
+        super.resetCursorRects()
+        addCursorRect(bounds, cursor: .pointingHand)
+    }
+}
+
 private final class CopyableCodeTextView: NSTextView {
     var codeBlocks: [MarkdownCodeRange] = [] {
         didSet { needsDisplay = true }
     }
+    var quoteRanges: [NSRange] = [] {
+        didSet { needsDisplay = true }
+    }
 
-    private let copyButton = NSButton()
+    private let copyButton = PointingHandCodeCopyButton()
+    private let copiedLabel = NSTextField(labelWithString: "已复制")
     private var trackingArea: NSTrackingArea?
     private var hoveredCode: String?
+    private var hideCopiedLabelWorkItem: DispatchWorkItem?
 
     private static let blockInsetX: CGFloat = 6
 
@@ -233,13 +317,28 @@ private final class CopyableCodeTextView: NSTextView {
     }
 
     override func draw(_ dirtyRect: NSRect) {
+        drawQuoteBars()
         drawCodeBackgrounds()
         super.draw(dirtyRect)
     }
 
+    private func drawQuoteBars() {
+        for range in quoteRanges {
+            guard let rect = contentRect(for: range) else { continue }
+            let path = NSBezierPath(roundedRect: NSRect(
+                x: 2,
+                y: rect.minY + 1,
+                width: 3,
+                height: max(rect.height - 2, 3)
+            ), xRadius: 1.5, yRadius: 1.5)
+            MarkdownStyle.quoteBar.setFill()
+            path.fill()
+        }
+    }
+
     private func drawCodeBackgrounds() {
         for block in codeBlocks {
-            guard let rect = backgroundRect(for: block.range) else { continue }
+            guard let rect = codeBackgroundRect(for: block.range) else { continue }
             let path = NSBezierPath(roundedRect: rect, xRadius: 9, yRadius: 9)
             MarkdownStyle.codeBackground.setFill()
             path.fill()
@@ -249,14 +348,18 @@ private final class CopyableCodeTextView: NSTextView {
         }
     }
 
-    private func backgroundRect(for range: NSRange) -> NSRect? {
+    private func contentRect(for range: NSRange) -> NSRect? {
         guard let layoutManager, let textContainer else { return nil }
         let glyphRange = layoutManager.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
         var rect = layoutManager.boundingRect(forGlyphRange: glyphRange, in: textContainer)
         let origin = textContainerOrigin
         rect.origin.x += origin.x
         rect.origin.y += origin.y
+        return rect
+    }
 
+    private func codeBackgroundRect(for range: NSRange) -> NSRect? {
+        guard let rect = contentRect(for: range) else { return nil }
         // The vertical padding is baked into the code block as real blank lines
         // (see appendCodeBlock), so the background hugs the glyph bounds exactly and
         // can never overlap the following paragraph.
@@ -286,6 +389,14 @@ private final class CopyableCodeTextView: NSTextView {
         copyButton.isHidden = true
         copyButton.toolTip = "复制代码"
         addSubview(copyButton)
+
+        copiedLabel.font = .systemFont(ofSize: 11, weight: .medium)
+        copiedLabel.textColor = NSColor.white.withAlphaComponent(0.88)
+        copiedLabel.alignment = .right
+        copiedLabel.isHidden = true
+        copiedLabel.alphaValue = 0
+        copiedLabel.frame = NSRect(x: 0, y: 0, width: 42, height: 18)
+        addSubview(copiedLabel)
     }
 
     override func updateTrackingAreas() {
@@ -317,30 +428,37 @@ private final class CopyableCodeTextView: NSTextView {
     private func updateCopyButton(for point: NSPoint) {
         guard let characterIndex = characterIndex(at: point),
               let block = codeBlocks.first(where: { NSLocationInRange(characterIndex, $0.range) }),
-              let rect = backgroundRect(for: block.range) else {
+              let rect = codeBackgroundRect(for: block.range) else {
             hideCopyButton()
             return
         }
 
         hoveredCode = block.code
-        copyButton.frame.origin = NSPoint(x: rect.maxX - copyButton.frame.width - 8, y: rect.minY + 1)
+        positionCopyControls(in: rect)
         copyButton.isHidden = false
     }
 
     private func hideCopyButton() {
         hoveredCode = nil
         copyButton.isHidden = true
+        hideCopiedLabel()
     }
 
     @objc private func copyHoveredCode() {
         guard let hoveredCode else { return }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(hoveredCode, forType: .string)
+        showCopiedLabel()
     }
 
     // MARK: Cursor / hit testing
 
     private func updateCursor(for point: NSPoint) {
+        if !copyButton.isHidden, copyButton.frame.contains(point) {
+            NSCursor.pointingHand.set()
+            return
+        }
+
         guard
             let characterIndex = characterIndex(at: point),
             let textStorage,
@@ -364,6 +482,43 @@ private final class CopyableCodeTextView: NSTextView {
         let glyphIndex = layoutManager.glyphIndex(for: containerPoint, in: textContainer)
         return layoutManager.characterIndexForGlyph(at: glyphIndex)
     }
+
+    private func positionCopyControls(in rect: NSRect) {
+        copyButton.frame.origin = NSPoint(x: rect.maxX - copyButton.frame.width - 8, y: rect.minY + 1)
+        copiedLabel.frame.origin = NSPoint(
+            x: copyButton.frame.minX - copiedLabel.frame.width - 7,
+            y: copyButton.frame.minY
+        )
+        window?.invalidateCursorRects(for: copyButton)
+    }
+
+    private func showCopiedLabel() {
+        hideCopiedLabelWorkItem?.cancel()
+        copiedLabel.isHidden = false
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.12
+            copiedLabel.animator().alphaValue = 1
+        }
+
+        let workItem = DispatchWorkItem { [weak self] in
+            self?.hideCopiedLabel()
+        }
+        hideCopiedLabelWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2, execute: workItem)
+    }
+
+    private func hideCopiedLabel() {
+        hideCopiedLabelWorkItem?.cancel()
+        hideCopiedLabelWorkItem = nil
+
+        guard !copiedLabel.isHidden || copiedLabel.alphaValue > 0 else { return }
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.16
+            copiedLabel.animator().alphaValue = 0
+        } completionHandler: { [weak self] in
+            self?.copiedLabel.isHidden = true
+        }
+    }
 }
 
 // MARK: - Attributed renderer
@@ -374,11 +529,13 @@ private enum MarkdownAttributedRenderer {
         attributedString: NSAttributedString,
         headingRanges: [Int: NSRange],
         codeBlocks: [MarkdownCodeRange],
+        quoteRanges: [NSRange],
         string: String
     ) {
         let result = NSMutableAttributedString()
         var headingRanges: [Int: NSRange] = [:]
         var codeBlocks: [MarkdownCodeRange] = []
+        var quoteRanges: [NSRange] = []
         var headingIndex = 0
 
         for block in blocks {
@@ -411,6 +568,9 @@ private enum MarkdownAttributedRenderer {
             case let .orderedList(items):
                 appendList(items, ordered: true, to: result)
 
+            case let .blockquote(text):
+                appendBlockquote(text, to: result, quoteRanges: &quoteRanges)
+
             case let .codeBlock(code, language):
                 appendSpacingIfNeeded(to: result, lines: 1)
                 appendCodeBlock(code: code, language: language, to: result, codeBlocks: &codeBlocks)
@@ -422,7 +582,7 @@ private enum MarkdownAttributedRenderer {
             result.deleteCharacters(in: NSRange(location: result.length - 1, length: 1))
         }
 
-        return (result, headingRanges, codeBlocks, result.string)
+        return (result, headingRanges, codeBlocks, quoteRanges, result.string)
     }
 
     private static func appendCodeBlock(
@@ -483,7 +643,7 @@ private enum MarkdownAttributedRenderer {
             result.append(NSAttributedString(
                 string: marker,
                 attributes: [
-                    .font: NSFont.systemFont(ofSize: 15, weight: .semibold),
+                    .font: MarkdownStyle.bodyFont(size: 16, weight: .semibold),
                     .foregroundColor: MarkdownStyle.listMarker,
                     .paragraphStyle: style
                 ]
@@ -497,6 +657,22 @@ private enum MarkdownAttributedRenderer {
             result.append(NSAttributedString(string: index == items.count - 1 ? "\n" : "\n"))
         }
         result.append(NSAttributedString(string: "\n"))
+    }
+
+    private static func appendBlockquote(_ text: String, to result: NSMutableAttributedString, quoteRanges: inout [NSRange]) {
+        appendSpacingIfNeeded(to: result, lines: 1)
+        let start = result.length
+        let style = paragraphStyle(lineSpacing: 8, paragraphSpacing: 10, headIndent: 18)
+        style.firstLineHeadIndent = 18
+        result.append(inlineAttributedString(
+            text,
+            font: MarkdownStyle.bodyFont,
+            color: MarkdownStyle.quoteText,
+            paragraphStyle: style
+        ))
+        let range = NSRange(location: start, length: max(result.length - start, 1))
+        quoteRanges.append(range)
+        result.append(NSAttributedString(string: "\n\n"))
     }
 
     private static func inlineAttributedString(
@@ -551,15 +727,15 @@ private enum MarkdownAttributedRenderer {
     private static func headingFont(for level: Int) -> NSFont {
         switch level {
         case 1:
-            .systemFont(ofSize: 28, weight: .bold)
+            MarkdownStyle.bodyFont(size: 31, weight: .bold)
         case 2:
-            .systemFont(ofSize: 23, weight: .bold)
+            MarkdownStyle.bodyFont(size: 25, weight: .bold)
         case 3:
-            .systemFont(ofSize: 19, weight: .semibold)
+            MarkdownStyle.bodyFont(size: 21, weight: .semibold)
         case 4:
-            .systemFont(ofSize: 16, weight: .semibold)
+            MarkdownStyle.bodyFont(size: 18, weight: .semibold)
         default:
-            .systemFont(ofSize: 15, weight: .semibold)
+            MarkdownStyle.bodyFont(size: 16, weight: .semibold)
         }
     }
 
@@ -584,12 +760,176 @@ private enum MarkdownAttributedRenderer {
     }
 }
 
+@MainActor
+private enum MarkdownCompactAttributedRenderer {
+    static func render(_ blocks: [MarkdownBlock], isCompleted: Bool) -> NSAttributedString {
+        let result = NSMutableAttributedString()
+
+        for block in blocks {
+            switch block.kind {
+            case let .heading(level, text):
+                appendSpacingIfNeeded(to: result)
+                result.append(inlineAttributedString(
+                    text,
+                    font: headingFont(for: level),
+                    color: .secondaryLabelColor,
+                    paragraphStyle: paragraphStyle(lineSpacing: 3, paragraphSpacing: 5)
+                ))
+                result.append(NSAttributedString(string: "\n"))
+
+            case let .paragraph(text):
+                result.append(inlineAttributedString(
+                    text,
+                    font: bodyFont,
+                    color: .secondaryLabelColor,
+                    paragraphStyle: paragraphStyle(lineSpacing: 4, paragraphSpacing: 5)
+                ))
+                result.append(NSAttributedString(string: "\n"))
+
+            case let .unorderedList(items):
+                appendList(items, ordered: false, to: result)
+
+            case let .orderedList(items):
+                appendList(items, ordered: true, to: result)
+
+            case let .blockquote(text):
+                appendSpacingIfNeeded(to: result)
+                result.append(inlineAttributedString(
+                    text,
+                    font: bodyFont,
+                    color: .tertiaryLabelColor,
+                    paragraphStyle: paragraphStyle(lineSpacing: 4, paragraphSpacing: 5, headIndent: 12)
+                ))
+                result.append(NSAttributedString(string: "\n"))
+
+            case let .codeBlock(code, _):
+                appendSpacingIfNeeded(to: result)
+                result.append(NSAttributedString(
+                    string: code.isEmpty ? " " : code,
+                    attributes: [
+                        .font: NSFont.monospacedSystemFont(ofSize: 12, weight: .regular),
+                        .foregroundColor: NSColor.secondaryLabelColor,
+                        .backgroundColor: MarkdownStyle.inlineCodeBackground,
+                        .paragraphStyle: paragraphStyle(lineSpacing: 3, paragraphSpacing: 5, lineBreakMode: .byCharWrapping)
+                    ]
+                ))
+                result.append(NSAttributedString(string: "\n"))
+            }
+        }
+
+        while result.string.hasSuffix("\n") {
+            result.deleteCharacters(in: NSRange(location: result.length - 1, length: 1))
+        }
+
+        if isCompleted, result.length > 0 {
+            result.addAttribute(.strikethroughStyle, value: NSUnderlineStyle.single.rawValue, range: NSRange(location: 0, length: result.length))
+        }
+
+        return result
+    }
+
+    private static let bodyFont = MarkdownStyle.bodyFont(size: 14, weight: .regular)
+
+    private static func appendList(_ items: [String], ordered: Bool, to result: NSMutableAttributedString) {
+        let style = paragraphStyle(lineSpacing: 4, paragraphSpacing: 4, headIndent: 20)
+        for (index, item) in items.enumerated() {
+            let marker = ordered ? "\(index + 1). " : "•  "
+            result.append(NSAttributedString(
+                string: marker,
+                attributes: [
+                    .font: MarkdownStyle.bodyFont(size: 14, weight: .semibold),
+                    .foregroundColor: NSColor.tertiaryLabelColor,
+                    .paragraphStyle: style
+                ]
+            ))
+            result.append(inlineAttributedString(
+                item,
+                font: bodyFont,
+                color: .secondaryLabelColor,
+                paragraphStyle: style
+            ))
+            result.append(NSAttributedString(string: "\n"))
+        }
+    }
+
+    private static func inlineAttributedString(
+        _ markdown: String,
+        font: NSFont,
+        color: NSColor,
+        paragraphStyle: NSParagraphStyle
+    ) -> NSAttributedString {
+        let baseAttributes: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .foregroundColor: color,
+            .paragraphStyle: paragraphStyle
+        ]
+
+        guard let attributed = try? NSMutableAttributedString(
+            markdown: markdown,
+            options: AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace),
+            baseURL: nil
+        ) else {
+            return NSAttributedString(string: markdown, attributes: baseAttributes)
+        }
+
+        let fullRange = NSRange(location: 0, length: attributed.length)
+        attributed.addAttributes(baseAttributes, range: fullRange)
+
+        attributed.enumerateAttribute(.inlinePresentationIntent, in: fullRange) { value, range, _ in
+            guard let raw = value as? Int else { return }
+            let intent = InlinePresentationIntent(rawValue: UInt(raw))
+
+            if intent.contains(.code) {
+                attributed.addAttributes([
+                    .font: NSFont.monospacedSystemFont(ofSize: 12, weight: .regular),
+                    .foregroundColor: MarkdownStyle.inlineCodeText,
+                    .backgroundColor: MarkdownStyle.inlineCodeBackground
+                ], range: range)
+                return
+            }
+
+            var traits: NSFontTraitMask = []
+            if intent.contains(.stronglyEmphasized) { traits.insert(.boldFontMask) }
+            if intent.contains(.emphasized) { traits.insert(.italicFontMask) }
+            if !traits.isEmpty {
+                attributed.addAttribute(.font, value: NSFontManager.shared.convert(font, toHaveTrait: traits), range: range)
+            }
+        }
+
+        return attributed
+    }
+
+    private static func headingFont(for level: Int) -> NSFont {
+        level <= 2 ? MarkdownStyle.bodyFont(size: 15, weight: .semibold) : MarkdownStyle.bodyFont(size: 14, weight: .semibold)
+    }
+
+    private static func paragraphStyle(
+        lineSpacing: CGFloat,
+        paragraphSpacing: CGFloat,
+        headIndent: CGFloat = 0,
+        lineBreakMode: NSLineBreakMode = .byWordWrapping
+    ) -> NSMutableParagraphStyle {
+        let style = NSMutableParagraphStyle()
+        style.lineSpacing = lineSpacing
+        style.paragraphSpacing = paragraphSpacing
+        style.headIndent = headIndent
+        style.firstLineHeadIndent = 0
+        style.lineBreakMode = lineBreakMode
+        return style
+    }
+
+    private static func appendSpacingIfNeeded(to result: NSMutableAttributedString) {
+        guard result.length > 0, !result.string.hasSuffix("\n") else { return }
+        result.append(NSAttributedString(string: "\n"))
+    }
+}
+
 // MARK: - Style palette
 
 @MainActor
 private enum MarkdownStyle {
-    static let bodyFont = NSFont.systemFont(ofSize: 15)
-    static let codeFont = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
+    static let bodyFont = bodyFont(size: 16, weight: .regular)
+    static let codeFont = NSFont.monospacedSystemFont(ofSize: 14, weight: .regular)
 
     // Inner vertical padding of a code block, rendered as real blank lines.
     static let codePadTop: CGFloat = 20
@@ -597,6 +937,8 @@ private enum MarkdownStyle {
 
     static let bodyText = dynamic(light: 0x3A3D44, dark: 0xCBD0D8)
     static let listMarker = dynamic(light: 0x4C6F9B, dark: 0x8FB3DE)
+    static let quoteText = dynamic(light: 0x5B6370, dark: 0xB7BECA)
+    static let quoteBar = dynamic(light: 0x8AA1BA, dark: 0x5F7FA4)
 
     // Code blocks always render on a dark panel for a consistent, premium look.
     static let codeBackground = NSColor(srgbRed: 0.145, green: 0.157, blue: 0.176, alpha: 1)
@@ -621,6 +963,18 @@ private enum MarkdownStyle {
             blue: CGFloat(hex & 0xFF) / 255,
             alpha: 1
         )
+    }
+
+    static func bodyFont(size: CGFloat, weight: NSFont.Weight) -> NSFont {
+        let descriptor = NSFont.systemFont(ofSize: size, weight: weight).fontDescriptor
+        let traits = descriptor.object(forKey: .traits) as? [NSFontDescriptor.TraitKey: Any]
+        let symbolicTraits = (traits?[.symbolic] as? UInt32).map(NSFontDescriptor.SymbolicTraits.init(rawValue:)) ?? []
+        let pingFangDescriptor = NSFontDescriptor(fontAttributes: [
+            .family: "PingFang SC",
+            .traits: [NSFontDescriptor.TraitKey.symbolic: symbolicTraits.rawValue]
+        ])
+
+        return NSFont(descriptor: pingFangDescriptor, size: size) ?? .systemFont(ofSize: size, weight: weight)
     }
 }
 
@@ -775,6 +1129,7 @@ struct MarkdownBlock: Identifiable {
         case paragraph(String)
         case unorderedList([String])
         case orderedList([String])
+        case blockquote(String)
         case codeBlock(code: String, language: String?)
     }
 }
@@ -793,6 +1148,7 @@ enum MarkdownBlockParser {
         var paragraphLines: [String] = []
         var unorderedItems: [String] = []
         var orderedItems: [String] = []
+        var quoteLines: [String] = []
         var codeLines: [String] = []
         var codeLanguage: String?
         var fenceDepth = 0
@@ -815,10 +1171,17 @@ enum MarkdownBlockParser {
             orderedItems.removeAll()
         }
 
+        func flushBlockquote() {
+            guard !quoteLines.isEmpty else { return }
+            blocks.append(MarkdownBlock(kind: .blockquote(quoteLines.joined(separator: "\n"))))
+            quoteLines.removeAll()
+        }
+
         func flushOpenBlocks() {
             flushParagraph()
             flushUnorderedList()
             flushOrderedList()
+            flushBlockquote()
         }
 
         func flushCodeBlock() {
@@ -871,9 +1234,18 @@ enum MarkdownBlockParser {
                 continue
             }
 
+            if let quoteLine = blockquoteLine(from: trimmed) {
+                flushParagraph()
+                flushUnorderedList()
+                flushOrderedList()
+                quoteLines.append(quoteLine)
+                continue
+            }
+
             if let item = unorderedListItem(from: trimmed) {
                 flushParagraph()
                 flushOrderedList()
+                flushBlockquote()
                 unorderedItems.append(item)
                 continue
             }
@@ -881,12 +1253,14 @@ enum MarkdownBlockParser {
             if let item = orderedListItem(from: trimmed) {
                 flushParagraph()
                 flushUnorderedList()
+                flushBlockquote()
                 orderedItems.append(item)
                 continue
             }
 
             flushUnorderedList()
             flushOrderedList()
+            flushBlockquote()
             paragraphLines.append(line)
         }
 
@@ -924,6 +1298,18 @@ enum MarkdownBlockParser {
 
         let text = remainder.trimmingCharacters(in: .whitespaces)
         return text.isEmpty ? nil : (markers.count, text)
+    }
+
+    private static func blockquoteLine(from line: String) -> String? {
+        guard line.hasPrefix(">") else {
+            return nil
+        }
+
+        let content = line.dropFirst()
+        if content.first == " " {
+            return String(content.dropFirst())
+        }
+        return String(content)
     }
 
     private static func unorderedListItem(from line: String) -> String? {

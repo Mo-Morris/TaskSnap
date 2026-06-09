@@ -5,8 +5,14 @@ import SwiftUI
 final class AppShellState: ObservableObject {
     @Published var isMainWindowCollapsed: Bool = false
     @Published var selectedNoteTaskID: TaskItem.ID?
+    @Published var noteTaskListScope: NoteTaskListScope = .all
     @Published var selectedArchivedTaskID: TaskItem.ID?
     @Published var manualTaskFormRequestID: Int = 0
+}
+
+enum NoteTaskListScope {
+    case all
+    case selectedOnly
 }
 
 struct TaskSnapApp: App {
@@ -66,7 +72,11 @@ struct TaskSnapApp: App {
         .windowStyle(.hiddenTitleBar)
 
         Window("任务笔记", id: "task-note") {
-            TaskNoteWindowView(store: store, selectedTaskID: $shellState.selectedNoteTaskID)
+            TaskNoteWindowView(
+                store: store,
+                selectedTaskID: $shellState.selectedNoteTaskID,
+                taskListScope: $shellState.noteTaskListScope
+            )
                 .frame(minWidth: 820, idealWidth: 1180, minHeight: 560, idealHeight: 760)
                 .preferredColorScheme(selectedTheme.colorScheme)
                 .background {
@@ -383,6 +393,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func menuOpenNoteWindow() {
+        shellState?.noteTaskListScope = .all
         NSApp.activate(ignoringOtherApps: true)
         openNoteWindow?()
     }

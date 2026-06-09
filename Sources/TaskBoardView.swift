@@ -217,12 +217,11 @@ struct TaskBoardView: View {
                                 withAnimation(reorderAnimation) {
                                     store.restore(task)
                                 }
-                            } onPreview: {
-                                previewTask = task
                             } onEdit: {
                                 editingTask = task
                             } onOpenNote: {
                                 shellState.selectedNoteTaskID = task.id
+                                shellState.noteTaskListScope = .selectedOnly
                                 openWindow(id: "task-note")
                             } onDragChanged: { translation, location in
                                 updateDragState(
@@ -826,7 +825,6 @@ private struct TaskRow: View {
     let onToggleComplete: () -> Void
     let onComplete: () -> Void
     let onRestore: () -> Void
-    let onPreview: () -> Void
     let onEdit: () -> Void
     let onOpenNote: () -> Void
     let onDragChanged: (CGSize, CGPoint) -> Void
@@ -867,29 +865,6 @@ private struct TaskRow: View {
             return Color.black.opacity(isPickedUp ? 0.45 : 0.30)
         }
         return Color.black.opacity(isPickedUp ? 0.22 : (isCompleted ? 0.025 : 0.07))
-    }
-
-    private var manualIconColor: Color {
-        switch task.backgroundColorHex.uppercased() {
-        case "#F8E7E0":
-            Color(red: 0.72, green: 0.27, blue: 0.18)
-        case "#E8F2D9":
-            Color(red: 0.32, green: 0.48, blue: 0.16)
-        case "#DDEFF5":
-            Color(red: 0.16, green: 0.45, blue: 0.58)
-        case "#F7EDCC":
-            Color(red: 0.60, green: 0.43, blue: 0.08)
-        case "#E9E4F7":
-            Color(red: 0.43, green: 0.32, blue: 0.68)
-        case "#DDF1EA":
-            Color(red: 0.16, green: 0.48, blue: 0.39)
-        case "#F5E0EC":
-            Color(red: 0.64, green: 0.25, blue: 0.47)
-        case "#E6EDF9":
-            Color(red: 0.23, green: 0.39, blue: 0.68)
-        default:
-            Color(nsColor: .labelColor).opacity(0.78)
-        }
     }
 
     private var displayTitle: String {
@@ -947,9 +922,7 @@ private struct TaskRow: View {
     }
 
     private var cardContent: some View {
-        HStack(alignment: .center, spacing: 14) {
-            leadingVisual
-
+        HStack(alignment: .center, spacing: 12) {
             VStack(alignment: .leading, spacing: 7) {
                 Text(displayTitle)
                     .font(.headline.weight(.semibold))
@@ -959,13 +932,7 @@ private struct TaskRow: View {
                     .minimumScaleFactor(0.72)
                     .multilineTextAlignment(.leading)
 
-                Text(displayDescription)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .strikethrough(isCompleted)
-                    .lineLimit(nil)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .multilineTextAlignment(.leading)
+                MarkdownDescriptionPreviewView(markdown: displayDescription, isCompleted: isCompleted)
 
                 SourceBadge(source: task.inputSource, isCompleted: isCompleted)
             }
@@ -1010,83 +977,6 @@ private struct TaskRow: View {
             .onEnded { _ in
                 onDragEnded()
             }
-    }
-
-    private var leadingVisual: some View {
-        Group {
-            switch task.inputSource {
-            case .screenshot:
-                thumbnail
-            case .manual:
-                manualIconTile
-            }
-        }
-        .frame(width: 36, height: 36)
-    }
-
-    @ViewBuilder
-    private var thumbnail: some View {
-        if let data = task.imageData, let image = NSImage(data: data) {
-            Button(action: onPreview) {
-                ZStack(alignment: .bottomTrailing) {
-                    Image(nsImage: image)
-                        .resizable()
-                        .scaledToFill()
-                        .frame(width: 36, height: 36)
-                        .clipped()
-                        .opacity(isCompleted ? 0.5 : 1)
-
-                    Image(systemName: "arrow.up.left.and.arrow.down.right")
-                        .font(.system(size: 8, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .frame(width: 12, height: 12)
-                        .background(Color.black.opacity(0.38))
-                        .clipShape(Circle())
-                        .padding(4)
-                }
-                .frame(width: 36, height: 36)
-                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .stroke(Color.black.opacity(0.14), lineWidth: 1.2)
-                }
-                .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-            }
-            .buttonStyle(.plain)
-            .pointingHandCursor()
-            .help("点击查看大图")
-            .accessibilityLabel("查看截图大图")
-        } else {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Color.white.opacity(0.72))
-                .frame(width: 36, height: 36)
-                .overlay {
-                    Image(systemName: "photo")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(.secondary)
-                }
-                .overlay {
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .stroke(Color.black.opacity(0.14), lineWidth: 1.2)
-                }
-        }
-    }
-
-    private var manualIconTile: some View {
-        RoundedRectangle(cornerRadius: 18, style: .continuous)
-            .fill(Color.white.opacity(0.9))
-            .frame(width: 36, height: 36)
-            .overlay {
-                Image(systemName: task.manualIconName ?? TaskItem.randomManualIconName())
-                    .font(.system(size: 15, weight: .semibold))
-                    .symbolRenderingMode(.hierarchical)
-                    .foregroundStyle(manualIconColor.opacity(isCompleted ? 0.62 : 1))
-            }
-            .overlay {
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .stroke(Color.black.opacity(0.12), lineWidth: 1)
-            }
-            .shadow(color: Color.black.opacity(0.04), radius: 10, y: 4)
     }
 }
 

@@ -5,6 +5,7 @@ import UniformTypeIdentifiers
 struct TaskNoteWindowView: View {
     @ObservedObject var store: TaskStore
     @Binding var selectedTaskID: TaskItem.ID?
+    @Binding var taskListScope: NoteTaskListScope
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var colorScheme
@@ -20,6 +21,15 @@ struct TaskNoteWindowView: View {
 
     private var visibleTasks: [TaskItem] {
         store.visibleTasks
+    }
+
+    private var sidebarTasks: [TaskItem] {
+        switch taskListScope {
+        case .all:
+            visibleTasks
+        case .selectedOnly:
+            selectedTask.map { [$0] } ?? []
+        }
     }
 
     private var selectedTask: TaskItem? {
@@ -128,15 +138,9 @@ struct TaskNoteWindowView: View {
                 }
             }
 
-            Text("从任务列表点击查看或添加笔记后进入这里；左侧只显示标题，用来快速切换当前任务。")
-                .font(.system(size: 12))
-                .foregroundStyle(.secondary)
-                .lineSpacing(3)
-                .fixedSize(horizontal: false, vertical: true)
-
             ScrollView {
                 VStack(spacing: 10) {
-                    ForEach(visibleTasks) { task in
+                    ForEach(sidebarTasks) { task in
                         TaskTitleListItem(
                             task: task,
                             selectedNoteID: selectedNoteID,
@@ -231,7 +235,7 @@ struct TaskNoteWindowView: View {
                     .font(.system(size: 15, weight: .semibold))
                     .lineLimit(1)
 
-                Text(note.map { "\(TaskDisplayText(task: task).title) · \($0.kind.label) · 自动保存" } ?? "\(TaskDisplayText(task: task).title) · 还没有笔记")
+                Text(note == nil ? "" : "自动保存")
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -296,14 +300,14 @@ struct TaskNoteWindowView: View {
                         MarkdownPreviewView(markdown: document.previewMarkdown, isOutlineVisible: isOutlineVisible)
                     }
                 case .markdown:
-                    TextEditor(text: noteMarkdownBinding)
-                        .font(.system(size: 14, design: .monospaced))
-                        .scrollContentBackground(.hidden)
+                    MarkdownEditorView(
+                        text: noteMarkdownBinding,
+                        isEditable: noteErrorMessage == nil || !noteMarkdown.isEmpty,
+                        autoFocus: isEditorFocused
+                    )
                         .padding(.horizontal, 44)
                         .padding(.vertical, 22)
                         .background(Color(nsColor: .textBackgroundColor))
-                        .focused($isEditorFocused)
-                        .disabled(noteErrorMessage != nil && noteMarkdown.isEmpty)
                         .onAppear {
                             isEditorFocused = true
                         }
@@ -515,20 +519,14 @@ private struct TaskTitleListItem: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Button(action: onSelectTask) {
-                VStack(alignment: .leading, spacing: 7) {
-                    Text(TaskDisplayText(task: task).title)
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(.primary)
-                        .lineLimit(1)
-
-                    Text(statusText)
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
+                Text(TaskDisplayText(task: task).title)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 14)
-                .padding(.vertical, 12)
-                .frame(maxWidth: .infinity, minHeight: 72, alignment: .leading)
+                .padding(.vertical, 14)
+                .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
                 .background(
                     RoundedRectangle(cornerRadius: 8, style: .continuous)
                         .fill(itemBackground)
@@ -586,12 +584,6 @@ private struct TaskTitleListItem: View {
         }
     }
 
-    private var statusText: String {
-        let noteCount = task.notes.count
-        let noteState = noteCount > 0 ? "\(noteCount) 篇笔记" : "空笔记"
-        let doneState = task.status == .completed ? "已完成" : "进行中"
-        return "\(noteState) · \(doneState)"
-    }
 }
 
 private struct NoteListItem: View {
