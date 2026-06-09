@@ -212,8 +212,6 @@ private final class CopyableCodeTextView: NSTextView {
     private var hoveredCode: String?
 
     private static let blockInsetX: CGFloat = 6
-    private static let blockPadTop: CGFloat = 18
-    private static let blockPadBottom: CGFloat = 24
 
     override convenience init(frame frameRect: NSRect) {
         let container = NSTextContainer(size: NSSize(width: 0, height: CGFloat.greatestFiniteMagnitude))
@@ -259,12 +257,15 @@ private final class CopyableCodeTextView: NSTextView {
         rect.origin.x += origin.x
         rect.origin.y += origin.y
 
+        // The vertical padding is baked into the code block as real blank lines
+        // (see appendCodeBlock), so the background hugs the glyph bounds exactly and
+        // can never overlap the following paragraph.
         let width = max(bounds.width - Self.blockInsetX * 2, 80)
         return NSRect(
             x: Self.blockInsetX,
-            y: rect.minY - Self.blockPadTop,
+            y: rect.minY,
             width: width,
-            height: rect.height + Self.blockPadTop + Self.blockPadBottom
+            height: rect.height
         )
     }
 
@@ -279,7 +280,7 @@ private final class CopyableCodeTextView: NSTextView {
         copyButton.wantsLayer = true
         copyButton.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.1).cgColor
         copyButton.layer?.cornerRadius = 5
-        copyButton.frame = NSRect(x: 0, y: 0, width: 24, height: 20)
+        copyButton.frame = NSRect(x: 0, y: 0, width: 24, height: 18)
         copyButton.target = self
         copyButton.action = #selector(copyHoveredCode)
         copyButton.isHidden = true
@@ -322,7 +323,7 @@ private final class CopyableCodeTextView: NSTextView {
         }
 
         hoveredCode = block.code
-        copyButton.frame.origin = NSPoint(x: rect.maxX - copyButton.frame.width - 8, y: rect.minY)
+        copyButton.frame.origin = NSPoint(x: rect.maxX - copyButton.frame.width - 8, y: rect.minY + 1)
         copyButton.isHidden = false
     }
 
@@ -413,7 +414,7 @@ private enum MarkdownAttributedRenderer {
             case let .codeBlock(code, language):
                 appendSpacingIfNeeded(to: result, lines: 1)
                 appendCodeBlock(code: code, language: language, to: result, codeBlocks: &codeBlocks)
-                result.append(NSAttributedString(string: "\n\n"))
+                appendCodeBlockTrailingSpacing(to: result)
             }
         }
 
@@ -437,16 +438,42 @@ private enum MarkdownAttributedRenderer {
         style.tailIndent = -18
 
         let start = result.length
-        let highlighted = CodeHighlighter.attributed(
+
+        // Top padding rendered as an empty line whose height is fixed; it is part of
+        // the highlighted range so the dark background hugs it exactly.
+        result.append(NSAttributedString(
+            string: "\n",
+            attributes: [.font: MarkdownStyle.codeFont, .paragraphStyle: padLineStyle(height: MarkdownStyle.codePadTop)]
+        ))
+
+        result.append(CodeHighlighter.attributed(
             for: content,
             language: language,
             font: MarkdownStyle.codeFont,
             baseColor: MarkdownStyle.codeText,
             paragraphStyle: style
-        )
-        result.append(highlighted)
+        ))
+
+        // Bottom padding: terminate the last code line, then a fixed-height blank line.
+        result.append(NSAttributedString(string: "\n", attributes: [.font: MarkdownStyle.codeFont, .paragraphStyle: style]))
+        result.append(NSAttributedString(
+            string: " ",
+            attributes: [.font: MarkdownStyle.codeFont, .paragraphStyle: padLineStyle(height: MarkdownStyle.codePadBottom)]
+        ))
+
         let range = NSRange(location: start, length: max(result.length - start, 1))
         codeBlocks.append(MarkdownCodeRange(range: range, code: code))
+    }
+
+    private static func padLineStyle(height: CGFloat) -> NSParagraphStyle {
+        let style = NSMutableParagraphStyle()
+        style.minimumLineHeight = height
+        style.maximumLineHeight = height
+        return style
+    }
+
+    private static func appendCodeBlockTrailingSpacing(to result: NSMutableAttributedString) {
+        result.append(NSAttributedString(string: "\n\n"))
     }
 
     private static func appendList(_ items: [String], ordered: Bool, to result: NSMutableAttributedString) {
@@ -563,6 +590,10 @@ private enum MarkdownAttributedRenderer {
 private enum MarkdownStyle {
     static let bodyFont = NSFont.systemFont(ofSize: 15)
     static let codeFont = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
+
+    // Inner vertical padding of a code block, rendered as real blank lines.
+    static let codePadTop: CGFloat = 20
+    static let codePadBottom: CGFloat = 16
 
     static let bodyText = dynamic(light: 0x3A3D44, dark: 0xCBD0D8)
     static let listMarker = dynamic(light: 0x4C6F9B, dark: 0x8FB3DE)
