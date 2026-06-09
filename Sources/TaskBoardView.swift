@@ -8,6 +8,7 @@ struct TaskBoardView: View {
     @EnvironmentObject private var shellState: AppShellState
     @Environment(\.openSettings) private var openSettings
     @Environment(\.openWindow) private var openWindow
+    @Environment(\.colorScheme) private var colorScheme
     @State private var isDropTargeted = false
     @State private var previewTask: TaskItem?
     @State private var editingTask: TaskItem?
@@ -143,11 +144,11 @@ struct TaskBoardView: View {
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(Color.primary.opacity(0.78))
                     .frame(width: 20, height: 20)
-                    .background(Color.white.opacity(0.76))
+                    .background(colorScheme == .dark ? Color.white.opacity(0.12) : Color.white.opacity(0.76))
                     .clipShape(Circle())
                     .overlay {
                         Circle()
-                            .stroke(Color.black.opacity(0.08), lineWidth: 1)
+                            .stroke(colorScheme == .dark ? Color.white.opacity(0.16) : Color.black.opacity(0.08), lineWidth: 1)
                     }
             }
             .buttonStyle(.plain)
@@ -160,7 +161,7 @@ struct TaskBoardView: View {
         .background(Color(nsColor: .windowBackgroundColor))
         .overlay(alignment: .bottom) {
             Rectangle()
-                .fill(Color.black.opacity(0.09))
+                .fill(Color(nsColor: .separatorColor))
                 .frame(height: 1)
         }
     }
@@ -832,9 +833,40 @@ private struct TaskRow: View {
     let onDragEnded: () -> Void
 
     @State private var isHovering = false
+    @Environment(\.colorScheme) private var colorScheme
+
+    private var isDark: Bool {
+        colorScheme == .dark
+    }
 
     private var cardColor: Color {
         Color(hex: task.backgroundColorHex)
+    }
+
+    private var cardBaseSurface: Color {
+        guard isDark else { return .clear }
+        return Color.white.opacity(isCompleted ? 0.04 : 0.07)
+    }
+
+    private var cardTintOpacity: Double {
+        if isDark {
+            return isCompleted ? 0.12 : 0.20
+        }
+        return isCompleted ? 0.18 : 0.34
+    }
+
+    private var cardStrokeColor: Color {
+        if isDark {
+            return cardColor.opacity(isCompleted ? 0.30 : 0.50)
+        }
+        return cardColor.opacity(0.72)
+    }
+
+    private var cardShadowColor: Color {
+        if isDark {
+            return Color.black.opacity(isPickedUp ? 0.45 : 0.30)
+        }
+        return Color.black.opacity(isPickedUp ? 0.22 : (isCompleted ? 0.025 : 0.07))
     }
 
     private var manualIconColor: Color {
@@ -880,7 +912,7 @@ private struct TaskRow: View {
         cardContent
             .scaleEffect(isPickedUp ? 1.04 : 1)
             .shadow(
-                color: Color.black.opacity(isPickedUp ? 0.22 : (isCompleted ? 0.025 : 0.07)),
+                color: cardShadowColor,
                 radius: isPickedUp ? 18 : 8,
                 y: isPickedUp ? 10 : 3
             )
@@ -953,14 +985,18 @@ private struct TaskRow: View {
         .frame(minHeight: 70)
         .background {
             RoundedRectangle(cornerRadius: 13, style: .continuous)
-                .fill(cardColor.opacity(isCompleted ? 0.18 : 0.34))
+                .fill(cardBaseSurface)
+                .overlay {
+                    RoundedRectangle(cornerRadius: 13, style: .continuous)
+                        .fill(cardColor.opacity(cardTintOpacity))
+                }
         }
         .overlay {
             RoundedRectangle(cornerRadius: 13, style: .continuous)
-                .stroke(cardColor.opacity(0.72), lineWidth: 1.2)
+                .stroke(cardStrokeColor, lineWidth: 1.2)
                 .allowsHitTesting(false)
         }
-        .opacity(isCompleted ? 0.68 : 1)
+        .opacity(isCompleted ? (isDark ? 0.78 : 0.68) : 1)
     }
 
     private var rowDragGesture: some Gesture {

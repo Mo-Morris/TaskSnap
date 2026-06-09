@@ -7,6 +7,7 @@ struct TaskNoteWindowView: View {
     @Binding var selectedTaskID: TaskItem.ID?
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorScheme) private var colorScheme
     @State private var displayMode: NoteDisplayMode = .preview
     @State private var editingTask: TaskItem?
     @State private var selectedNoteID: TaskNote.ID?
@@ -181,11 +182,11 @@ struct TaskNoteWindowView: View {
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(.primary)
                     .frame(width: 32, height: 32)
-                    .background(Color.white.opacity(0.72))
+                    .background(colorScheme == .dark ? Color.white.opacity(0.10) : Color.white.opacity(0.72))
                     .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
                     .overlay {
                         RoundedRectangle(cornerRadius: 7, style: .continuous)
-                            .stroke(Color.black.opacity(0.1), lineWidth: 1)
+                            .stroke(colorScheme == .dark ? Color.white.opacity(0.16) : Color.black.opacity(0.1), lineWidth: 1)
                     }
             }
             .buttonStyle(.plain)
@@ -491,6 +492,26 @@ private struct TaskTitleListItem: View {
     let onAttachExternalNote: () -> Void
     let onDeleteNote: (TaskNote) -> Void
 
+    @Environment(\.colorScheme) private var colorScheme
+
+    private var isDark: Bool {
+        colorScheme == .dark
+    }
+
+    private var itemBackground: Color {
+        if isSelected {
+            return Color(hex: task.backgroundColorHex).opacity(isDark ? 0.24 : 0.36)
+        }
+        return isDark ? Color.white.opacity(0.06) : Color.white.opacity(0.62)
+    }
+
+    private var itemStroke: Color {
+        if isSelected {
+            return Color.accentColor.opacity(isDark ? 0.45 : 0.32)
+        }
+        return isDark ? Color.white.opacity(0.10) : Color.black.opacity(0.08)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Button(action: onSelectTask) {
@@ -510,7 +531,7 @@ private struct TaskTitleListItem: View {
                 .frame(maxWidth: .infinity, minHeight: 72, alignment: .leading)
                 .background(
                     RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(isSelected ? Color(hex: task.backgroundColorHex).opacity(0.36) : Color.white.opacity(0.62))
+                        .fill(itemBackground)
                 )
                 .overlay(alignment: .leading) {
                     if isSelected {
@@ -522,7 +543,7 @@ private struct TaskTitleListItem: View {
                 }
                 .overlay {
                     RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .stroke(isSelected ? Color.accentColor.opacity(0.32) : Color.black.opacity(0.08), lineWidth: 1)
+                        .stroke(itemStroke, lineWidth: 1)
                 }
             }
             .buttonStyle(.plain)
@@ -627,17 +648,19 @@ private struct NoteToolbarButton: View {
     let help: String
     let action: () -> Void
 
+    @Environment(\.colorScheme) private var colorScheme
+
     var body: some View {
         Button(action: action) {
             Image(systemName: systemName)
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(.primary)
                 .frame(width: 30, height: 30)
-                .background(Color.white.opacity(0.72))
+                .background(colorScheme == .dark ? Color.white.opacity(0.10) : Color.white.opacity(0.72))
                 .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
                 .overlay {
                     RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        .stroke(Color.black.opacity(0.1), lineWidth: 1)
+                        .stroke(colorScheme == .dark ? Color.white.opacity(0.16) : Color.black.opacity(0.1), lineWidth: 1)
                 }
         }
         .buttonStyle(.plain)
@@ -881,6 +904,8 @@ private struct MarkdownOutlineView: View {
     let items: [MarkdownOutlineItem]
     let onSelect: (MarkdownOutlineItem) -> Void
 
+    @Environment(\.colorScheme) private var colorScheme
+
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
             Text("大纲")
@@ -909,7 +934,7 @@ private struct MarkdownOutlineView: View {
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(Color.black.opacity(0.08), lineWidth: 1)
+                .stroke(colorScheme == .dark ? Color.white.opacity(0.12) : Color.black.opacity(0.08), lineWidth: 1)
         }
     }
 

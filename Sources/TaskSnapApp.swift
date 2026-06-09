@@ -55,6 +55,13 @@ struct TaskSnapApp: App {
                 .allowsHitTesting(false)
                 .frame(width: 0, height: 0)
             }
+            .background {
+                SettingsOpenerBridge { openSettingsWindow in
+                    appDelegate.openSettingsWindow = openSettingsWindow
+                }
+                .allowsHitTesting(false)
+                .frame(width: 0, height: 0)
+            }
         }
         .windowStyle(.hiddenTitleBar)
 
@@ -126,6 +133,21 @@ private struct ArchiveWindowOpenerBridge: View {
     }
 }
 
+private struct SettingsOpenerBridge: View {
+    let register: (@escaping () -> Void) -> Void
+
+    @Environment(\.openSettings) private var openSettings
+
+    var body: some View {
+        Color.clear
+            .onAppear {
+                register {
+                    openSettings()
+                }
+            }
+    }
+}
+
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     weak var pasteCommandDispatcher: PasteCommandDispatcher?
@@ -133,6 +155,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     weak var store: TaskStore?
     var openNoteWindow: (() -> Void)?
     var openArchiveWindow: (() -> Void)?
+    var openSettingsWindow: (() -> Void)?
     private var pasteEventMonitor: Any?
     private var statusItem: NSStatusItem?
 
@@ -384,7 +407,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func menuOpenPreferences() {
         NSApp.activate(ignoringOtherApps: true)
-        NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+        if let openSettingsWindow {
+            openSettingsWindow()
+        } else {
+            NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+        }
     }
 
     @objc private func menuShowAboutPanel() {
