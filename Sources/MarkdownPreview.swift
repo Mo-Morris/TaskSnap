@@ -541,26 +541,26 @@ private enum MarkdownAttributedRenderer {
         for block in blocks {
             switch block.kind {
             case let .heading(level, text):
-                appendSpacingIfNeeded(to: result, lines: level <= 1 ? 1 : 2)
+                appendSpacingIfNeeded(to: result, lines: 1)
                 let start = result.length
                 result.append(inlineAttributedString(
                     text,
                     font: headingFont(for: level),
                     color: .labelColor,
-                    paragraphStyle: paragraphStyle(lineSpacing: 3, paragraphSpacing: 8)
+                    paragraphStyle: paragraphStyle(lineSpacing: 1.5, paragraphSpacing: 4)
                 ))
                 headingRanges[headingIndex] = NSRange(location: start, length: max(result.length - start, 1))
                 headingIndex += 1
-                result.append(NSAttributedString(string: "\n\n"))
+                result.append(NSAttributedString(string: "\n"))
 
             case let .paragraph(text):
                 result.append(inlineAttributedString(
                     text,
                     font: MarkdownStyle.bodyFont,
                     color: MarkdownStyle.bodyText,
-                    paragraphStyle: paragraphStyle(lineSpacing: 9, paragraphSpacing: 10)
+                    paragraphStyle: paragraphStyle(lineSpacing: 4, paragraphSpacing: 6)
                 ))
-                result.append(NSAttributedString(string: "\n\n"))
+                result.append(NSAttributedString(string: "\n"))
 
             case let .unorderedList(items):
                 appendList(items, ordered: false, to: result)
@@ -637,7 +637,7 @@ private enum MarkdownAttributedRenderer {
     }
 
     private static func appendList(_ items: [String], ordered: Bool, to result: NSMutableAttributedString) {
-        let style = paragraphStyle(lineSpacing: 7, paragraphSpacing: 8, headIndent: 26)
+        let style = paragraphStyle(lineSpacing: 4, paragraphSpacing: 4, headIndent: 26)
         for (index, item) in items.enumerated() {
             let marker = ordered ? "\(index + 1). " : "•  "
             result.append(NSAttributedString(
@@ -662,7 +662,7 @@ private enum MarkdownAttributedRenderer {
     private static func appendBlockquote(_ text: String, to result: NSMutableAttributedString, quoteRanges: inout [NSRange]) {
         appendSpacingIfNeeded(to: result, lines: 1)
         let start = result.length
-        let style = paragraphStyle(lineSpacing: 8, paragraphSpacing: 10, headIndent: 18)
+        let style = paragraphStyle(lineSpacing: 4, paragraphSpacing: 6, headIndent: 18)
         style.firstLineHeadIndent = 18
         result.append(inlineAttributedString(
             text,
@@ -672,7 +672,7 @@ private enum MarkdownAttributedRenderer {
         ))
         let range = NSRange(location: start, length: max(result.length - start, 1))
         quoteRanges.append(range)
-        result.append(NSAttributedString(string: "\n\n"))
+        result.append(NSAttributedString(string: "\n"))
     }
 
     private static func inlineAttributedString(
