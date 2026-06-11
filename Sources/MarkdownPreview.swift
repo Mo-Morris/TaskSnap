@@ -65,7 +65,6 @@ struct MarkdownDescriptionPreviewView: View {
             blocks: MarkdownBlockParser.parse(markdown),
             isCompleted: isCompleted
         )
-        .allowsHitTesting(false)
         .fixedSize(horizontal: false, vertical: true)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -75,13 +74,14 @@ private struct CompactMarkdownTextView: NSViewRepresentable {
     let blocks: [MarkdownBlock]
     let isCompleted: Bool
 
-    func makeNSView(context: Context) -> NSTextView {
-        let textView = NSTextView(frame: .zero)
+    func makeNSView(context: Context) -> CompactLinkTextView {
+        let textView = CompactLinkTextView(frame: .zero)
         textView.isEditable = false
-        textView.isSelectable = false
+        textView.isSelectable = true
         textView.isRichText = true
         textView.drawsBackground = false
         textView.allowsUndo = false
+        textView.delegate = context.coordinator
         textView.textContainerInset = .zero
         textView.textContainer?.lineFragmentPadding = 0
         textView.textContainer?.widthTracksTextView = true
@@ -96,11 +96,11 @@ private struct CompactMarkdownTextView: NSViewRepresentable {
         return textView
     }
 
-    func updateNSView(_ textView: NSTextView, context: Context) {
+    func updateNSView(_ textView: CompactLinkTextView, context: Context) {
         applyContent(to: textView)
     }
 
-    func sizeThatFits(_ proposal: ProposedViewSize, nsView textView: NSTextView, context: Context) -> CGSize? {
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView textView: CompactLinkTextView, context: Context) -> CGSize? {
         guard let width = proposal.width ?? (textView.bounds.width > 0 ? textView.bounds.width : nil),
               width > 0,
               let layoutManager = textView.layoutManager,
@@ -118,9 +118,89 @@ private struct CompactMarkdownTextView: NSViewRepresentable {
         return CGSize(width: width, height: max(height, 1))
     }
 
-    private func applyContent(to textView: NSTextView) {
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
+    private func applyContent(to textView: CompactLinkTextView) {
         textView.textStorage?.setAttributedString(MarkdownCompactAttributedRenderer.render(blocks, isCompleted: isCompleted))
         textView.invalidateIntrinsicContentSize()
+    }
+
+    final class Coordinator: NSObject, NSTextViewDelegate {
+        func textView(_ textView: NSTextView, clickedOnLink link: Any, at charIndex: Int) -> Bool {
+            guard let url = CompactLinkTextView.url(from: link) else {
+                return false
+            }
+
+            NSWorkspace.shared.open(url)
+            return true
+        }
+    }
+}
+
+private final class CompactLinkTextView: NSTextView {
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        guard let superview else { return nil }
+
+        let localPoint = convert(point, from: superview)
+        guard bounds.contains(localPoint), linkValue(at: localPoint) != nil else {
+            return nil
+        }
+
+        return self
+    }
+
+    override func resetCursorRects() {
+        super.resetCursorRects()
+        addCursorRect(bounds, cursor: .pointingHand)
+    }
+
+    private func linkValue(at point: NSPoint) -> Any? {
+        guard
+            let layoutManager,
+            let textContainer,
+            let textStorage,
+            textStorage.length > 0
+        else {
+            return nil
+        }
+
+        let textContainerPoint = NSPoint(
+            x: point.x - textContainerOrigin.x,
+            y: point.y - textContainerOrigin.y
+        )
+        let glyphIndex = layoutManager.glyphIndex(for: textContainerPoint, in: textContainer)
+        guard glyphIndex < layoutManager.numberOfGlyphs else {
+            return nil
+        }
+
+        let glyphRect = layoutManager.boundingRect(
+            forGlyphRange: NSRange(location: glyphIndex, length: 1),
+            in: textContainer
+        )
+        guard glyphRect.insetBy(dx: -2, dy: -2).contains(textContainerPoint) else {
+            return nil
+        }
+
+        let characterIndex = layoutManager.characterIndexForGlyph(at: glyphIndex)
+        guard characterIndex < textStorage.length else {
+            return nil
+        }
+
+        return textStorage.attribute(.link, at: characterIndex, effectiveRange: nil)
+    }
+
+    static func url(from link: Any) -> URL? {
+        if let url = link as? URL {
+            return url
+        }
+
+        if let string = link as? String {
+            return URL(string: string)
+        }
+
+        return nil
     }
 }
 
