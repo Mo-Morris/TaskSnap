@@ -145,13 +145,30 @@ private final class CompactLinkTextView: NSTextView {
     private var hoveredLinkRange: NSRange?
 
     override func hitTest(_ point: NSPoint) -> NSView? {
-        guard let superview else { return nil }
-
-        let localPoint = convert(point, from: superview)
-        guard bounds.contains(localPoint), linkRange(at: localPoint) != nil else {
+        // This text view is embedded directly in SwiftUI. When the pointer is
+        // NOT over a link we must return nil so the surrounding card keeps
+        // receiving clicks/drags. The catch: while nil is returned the card owns
+        // the pointer, and once we DO return self (over a link) AppKit no longer
+        // routes `mouseMoved`/`cursorUpdate` to us — SwiftUI's host owns cursor
+        // management. `hitTest` is therefore the only callback that fires
+        // reliably on every pointer move at any window width, so we drive the
+        // hover highlight + pointer cursor from right here.
+        //
+        // `point` arrives in the superview's coordinate system and must be
+        // converted into this view's own (flipped) coordinates first.
+        let localPoint = superview.map { convert(point, from: $0) } ?? point
+        guard bounds.contains(localPoint) else {
+            clearHoveredLink()
             return nil
         }
 
+        let range = linkRange(at: localPoint)
+        updateHoveredLink(to: range)
+        guard range != nil else {
+            return nil
+        }
+
+        NSCursor.pointingHand.set()
         return self
     }
 
@@ -160,22 +177,32 @@ private final class CompactLinkTextView: NSTextView {
         if let trackingArea {
             removeTrackingArea(trackingArea)
         }
+        // NOTE: do NOT use `.inVisibleRect` here. This text view is embedded
+        // directly in SwiftUI (no enclosing scroll view) and is vertically
+        // self-resizing, which makes `visibleRect` report a stale, fixed-size
+        // rectangle that does not follow the real bounds. Binding the tracking
+        // area to that bogus rect makes hover detection stop firing once the
+        // card grows wider. An explicit `bounds` rect, rebuilt on every layout
+        // pass, stays correct at any window width.
         let area = NSTrackingArea(
             rect: bounds,
-            options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+            options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow],
             owner: self
         )
         addTrackingArea(area)
         trackingArea = area
     }
 
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        updateTrackingAreas()
+    }
+
     override func mouseMoved(with event: NSEvent) {
         super.mouseMoved(with: event)
-        let point = convert(event.locationInWindow, from: nil)
-        updateHoveredLink(at: point)
-        if hoveredLinkRange != nil {
-            NSCursor.pointingHand.set()
-        }
+        // Fires only over the non-link part of the card (where `hitTest`
+        // returns nil); used purely to drop a stale highlight.
+        updateHoveredLink(to: linkRange(at: convert(event.locationInWindow, from: nil)))
     }
 
     override func mouseExited(with event: NSEvent) {
@@ -193,37 +220,31 @@ private final class CompactLinkTextView: NSTextView {
             return nil
         }
 
+        layoutManager.ensureLayout(for: textContainer)
         let textContainerPoint = NSPoint(
             x: point.x - textContainerOrigin.x,
             y: point.y - textContainerOrigin.y
         )
-        let glyphIndex = layoutManager.glyphIndex(for: textContainerPoint, in: textContainer)
-        guard glyphIndex < layoutManager.numberOfGlyphs else {
-            return nil
+        var hitRange: NSRange?
+        textStorage.enumerateAttribute(.link, in: NSRange(location: 0, length: textStorage.length)) { value, range, stop in
+            guard value != nil else { return }
+            let glyphRange = layoutManager.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+            guard glyphRange.length > 0 else { return }
+            layoutManager.enumerateLineFragments(forGlyphRange: glyphRange) { _, _, _, lineGlyphRange, lineStop in
+                let fragmentGlyphRange = NSIntersectionRange(glyphRange, lineGlyphRange)
+                guard fragmentGlyphRange.length > 0 else { return }
+                let rect = layoutManager.boundingRect(forGlyphRange: fragmentGlyphRange, in: textContainer)
+                if rect.insetBy(dx: -2, dy: -2).contains(textContainerPoint) {
+                    hitRange = range
+                    lineStop.pointee = true
+                    stop.pointee = true
+                }
+            }
         }
-
-        let glyphRect = layoutManager.boundingRect(
-            forGlyphRange: NSRange(location: glyphIndex, length: 1),
-            in: textContainer
-        )
-        guard glyphRect.insetBy(dx: -2, dy: -2).contains(textContainerPoint) else {
-            return nil
-        }
-
-        let characterIndex = layoutManager.characterIndexForGlyph(at: glyphIndex)
-        guard characterIndex < textStorage.length else {
-            return nil
-        }
-
-        var range = NSRange(location: 0, length: 0)
-        guard textStorage.attribute(.link, at: characterIndex, effectiveRange: &range) != nil else {
-            return nil
-        }
-        return range
+        return hitRange
     }
 
-    private func updateHoveredLink(at point: NSPoint) {
-        let range = linkRange(at: point)
+    private func updateHoveredLink(to range: NSRange?) {
         if NSEqualRanges(range ?? NSRange(location: NSNotFound, length: 0), hoveredLinkRange ?? NSRange(location: NSNotFound, length: 0)) {
             return
         }
@@ -644,15 +665,35 @@ private final class CopyableCodeTextView: NSTextView {
     }
 
     private func linkRange(at point: NSPoint) -> NSRange? {
-        guard let textStorage, let characterIndex = characterIndex(at: point, requiringGlyphHit: true), characterIndex < textStorage.length else {
+        guard
+            let layoutManager,
+            let textContainer,
+            let textStorage,
+            textStorage.length > 0
+        else {
             return nil
         }
 
-        var range = NSRange(location: 0, length: 0)
-        guard textStorage.attribute(.link, at: characterIndex, effectiveRange: &range) != nil else {
-            return nil
+        layoutManager.ensureLayout(for: textContainer)
+        let origin = textContainerOrigin
+        let containerPoint = NSPoint(x: point.x - origin.x, y: point.y - origin.y)
+        var hitRange: NSRange?
+        textStorage.enumerateAttribute(.link, in: NSRange(location: 0, length: textStorage.length)) { value, range, stop in
+            guard value != nil else { return }
+            let glyphRange = layoutManager.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+            guard glyphRange.length > 0 else { return }
+            layoutManager.enumerateLineFragments(forGlyphRange: glyphRange) { _, _, _, lineGlyphRange, lineStop in
+                let fragmentGlyphRange = NSIntersectionRange(glyphRange, lineGlyphRange)
+                guard fragmentGlyphRange.length > 0 else { return }
+                let rect = layoutManager.boundingRect(forGlyphRange: fragmentGlyphRange, in: textContainer)
+                if rect.insetBy(dx: -2, dy: -2).contains(containerPoint) {
+                    hitRange = range
+                    lineStop.pointee = true
+                    stop.pointee = true
+                }
+            }
         }
-        return range
+        return hitRange
     }
 
     private func characterIndex(at point: NSPoint, requiringGlyphHit: Bool = false) -> Int? {
