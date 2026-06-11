@@ -31,11 +31,29 @@ struct TaskBoardView: View {
             if shellState.isMainWindowCollapsed {
                 CollapsedTaskIconView(
                     activeTaskCount: activeTaskCount,
+                    completedTaskCount: store.tasks.filter { $0.status == .completed }.count,
                     isWorking: !store.summarizingTaskIDs.isEmpty
                 ) {
                     withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
                         shellState.isMainWindowCollapsed = false
                     }
+                } onHideFloatingWindow: {
+                    NSApp.windows.first { $0.title == "TaskSnap" }?.orderOut(nil)
+                } onOpenNote: {
+                    shellState.noteTaskListScope = .all
+                    NSApp.activate(ignoringOtherApps: true)
+                    openWindow(id: "task-note")
+                } onCreateManualTask: {
+                    shellState.isMainWindowCollapsed = false
+                    isShowingManualTaskForm = true
+                } onOpenArchive: {
+                    NSApp.activate(ignoringOtherApps: true)
+                    openWindow(id: "task-archive")
+                } onArchiveCompleted: {
+                    store.archiveCompleted()
+                } onOpenPreferences: {
+                    NSApp.activate(ignoringOtherApps: true)
+                    openSettings()
                 }
             } else {
                 expandedBoard
@@ -541,8 +559,15 @@ struct TaskBoardView: View {
 
 private struct CollapsedTaskIconView: View {
     let activeTaskCount: Int
+    let completedTaskCount: Int
     let isWorking: Bool
     let onExpand: () -> Void
+    let onHideFloatingWindow: () -> Void
+    let onOpenNote: () -> Void
+    let onCreateManualTask: () -> Void
+    let onOpenArchive: () -> Void
+    let onArchiveCompleted: () -> Void
+    let onOpenPreferences: () -> Void
 
     @State private var isAnimating = false
     @State private var isHovered = false
@@ -572,6 +597,55 @@ private struct CollapsedTaskIconView: View {
             .accessibilityLabel("展开任务列表")
             .accessibilityValue(activeTaskCount > 0 ? "\(activeTaskCount) 个任务进行中" : "没有进行中的任务")
             .accessibilityAddTraits(.isButton)
+            .contextMenu {
+                Button(action: onHideFloatingWindow) {
+                    Label("隐藏浮窗", systemImage: "eye.slash")
+                }
+
+                Button(action: onExpand) {
+                    Label("展开任务列表", systemImage: "rectangle.expand.vertical")
+                }
+
+                Button(action: onOpenNote) {
+                    Label("打开任务笔记", systemImage: "note.text")
+                }
+
+                Button(action: onCreateManualTask) {
+                    Label("新建手动任务", systemImage: "plus.circle")
+                }
+
+                Button(action: onOpenArchive) {
+                    Label("归档管理…", systemImage: "archivebox")
+                }
+
+                Button(action: onArchiveCompleted) {
+                    Label("归档已完成任务", systemImage: "checkmark.circle")
+                }
+                .disabled(completedTaskCount == 0)
+
+                Divider()
+
+                Button(action: onOpenPreferences) {
+                    Label("偏好设置…", systemImage: "gearshape")
+                }
+                .keyboardShortcut(",", modifiers: .command)
+
+                Button {
+                    NSApp.activate(ignoringOtherApps: true)
+                    NSApp.orderFrontStandardAboutPanel(nil)
+                } label: {
+                    Label("关于 TaskSnap", systemImage: "info.circle")
+                }
+
+                Divider()
+
+                Button {
+                    NSApp.terminate(nil)
+                } label: {
+                    Label("退出 TaskSnap", systemImage: "power")
+                }
+                .keyboardShortcut("q", modifiers: .command)
+            }
             .onAppear {
                 isAnimating = isWorking
                 isHinting = true
@@ -901,6 +975,10 @@ private struct TaskRow: View {
                 isHovering = hovering
             }
             .contextMenu {
+                Button(action: onOpenNote) {
+                    Label("查看任务笔记", systemImage: "note.text")
+                }
+
                 if isCompleted {
                     Button(action: onRestore) {
                         Label("恢复进行中", systemImage: "arrow.uturn.backward.circle")
@@ -938,10 +1016,6 @@ private struct TaskRow: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
-            .onTapGesture {
-                guard !isPickedUp else { return }
-                onOpenNote()
-            }
 
             DragGrip()
                 .opacity(isPickedUp || isHovering ? 0.62 : 0)
