@@ -20,6 +20,10 @@ struct MarkdownEditorView: NSViewRepresentable {
         textView.isEditable = isEditable
         textView.isSelectable = true
         textView.isRichText = false
+        textView.isAutomaticDashSubstitutionEnabled = false
+        textView.isAutomaticQuoteSubstitutionEnabled = false
+        textView.isAutomaticTextReplacementEnabled = false
+        textView.isAutomaticSpellingCorrectionEnabled = false
         textView.allowsUndo = true
         textView.usesFindBar = true
         textView.drawsBackground = false

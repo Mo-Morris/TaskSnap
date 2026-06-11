@@ -123,6 +123,7 @@ private struct CompactMarkdownTextView: NSViewRepresentable {
     }
 
     private func applyContent(to textView: CompactLinkTextView) {
+        textView.clearHoveredLink()
         textView.textStorage?.setAttributedString(MarkdownCompactAttributedRenderer.render(blocks, isCompleted: isCompleted))
         textView.invalidateIntrinsicContentSize()
     }
@@ -140,23 +141,49 @@ private struct CompactMarkdownTextView: NSViewRepresentable {
 }
 
 private final class CompactLinkTextView: NSTextView {
+    private var trackingArea: NSTrackingArea?
+    private var hoveredLinkRange: NSRange?
+
     override func hitTest(_ point: NSPoint) -> NSView? {
         guard let superview else { return nil }
 
         let localPoint = convert(point, from: superview)
-        guard bounds.contains(localPoint), linkValue(at: localPoint) != nil else {
+        guard bounds.contains(localPoint), linkRange(at: localPoint) != nil else {
             return nil
         }
 
         return self
     }
 
-    override func resetCursorRects() {
-        super.resetCursorRects()
-        addCursorRect(bounds, cursor: .pointingHand)
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingArea {
+            removeTrackingArea(trackingArea)
+        }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+            owner: self
+        )
+        addTrackingArea(area)
+        trackingArea = area
     }
 
-    private func linkValue(at point: NSPoint) -> Any? {
+    override func mouseMoved(with event: NSEvent) {
+        super.mouseMoved(with: event)
+        let point = convert(event.locationInWindow, from: nil)
+        updateHoveredLink(at: point)
+        if hoveredLinkRange != nil {
+            NSCursor.pointingHand.set()
+        }
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        super.mouseExited(with: event)
+        clearHoveredLink()
+    }
+
+    private func linkRange(at point: NSPoint) -> NSRange? {
         guard
             let layoutManager,
             let textContainer,
@@ -188,7 +215,33 @@ private final class CompactLinkTextView: NSTextView {
             return nil
         }
 
-        return textStorage.attribute(.link, at: characterIndex, effectiveRange: nil)
+        var range = NSRange(location: 0, length: 0)
+        guard textStorage.attribute(.link, at: characterIndex, effectiveRange: &range) != nil else {
+            return nil
+        }
+        return range
+    }
+
+    private func updateHoveredLink(at point: NSPoint) {
+        let range = linkRange(at: point)
+        if NSEqualRanges(range ?? NSRange(location: NSNotFound, length: 0), hoveredLinkRange ?? NSRange(location: NSNotFound, length: 0)) {
+            return
+        }
+
+        clearHoveredLink()
+        guard let range else { return }
+        layoutManager?.addTemporaryAttributes(MarkdownStyle.linkHoverAttributes, forCharacterRange: range)
+        hoveredLinkRange = range
+        needsDisplay = true
+    }
+
+    func clearHoveredLink() {
+        guard let hoveredLinkRange else { return }
+        layoutManager?.removeTemporaryAttribute(.backgroundColor, forCharacterRange: hoveredLinkRange)
+        layoutManager?.removeTemporaryAttribute(.foregroundColor, forCharacterRange: hoveredLinkRange)
+        layoutManager?.removeTemporaryAttribute(.underlineStyle, forCharacterRange: hoveredLinkRange)
+        self.hoveredLinkRange = nil
+        needsDisplay = true
     }
 
     static func url(from link: Any) -> URL? {
@@ -313,9 +366,11 @@ private struct SelectableMarkdownTextView: NSViewRepresentable {
         let rendered = MarkdownAttributedRenderer.render(blocks)
         guard context.coordinator.lastRenderedText != rendered.string else { return }
 
+        textView.clearHoveredLink()
         textView.textStorage?.setAttributedString(rendered.attributedString)
         textView.codeBlocks = rendered.codeBlocks
         textView.quoteRanges = rendered.quoteRanges
+        textView.dividerRanges = rendered.dividerRanges
         textView.needsDisplay = true
         context.coordinator.lastRenderedText = rendered.string
         context.coordinator.headingRanges = rendered.headingRanges
@@ -368,11 +423,15 @@ private final class CopyableCodeTextView: NSTextView {
     var quoteRanges: [NSRange] = [] {
         didSet { needsDisplay = true }
     }
+    var dividerRanges: [NSRange] = [] {
+        didSet { needsDisplay = true }
+    }
 
     private let copyButton = PointingHandCodeCopyButton()
     private let copiedLabel = NSTextField(labelWithString: "已复制")
     private var trackingArea: NSTrackingArea?
     private var hoveredCode: String?
+    private var hoveredLinkRange: NSRange?
     private var hideCopiedLabelWorkItem: DispatchWorkItem?
 
     private static let blockInsetX: CGFloat = 6
@@ -399,6 +458,7 @@ private final class CopyableCodeTextView: NSTextView {
     override func draw(_ dirtyRect: NSRect) {
         drawQuoteBars()
         drawCodeBackgrounds()
+        drawDividers()
         super.draw(dirtyRect)
     }
 
@@ -423,6 +483,19 @@ private final class CopyableCodeTextView: NSTextView {
             MarkdownStyle.codeBackground.setFill()
             path.fill()
             MarkdownStyle.codeBorder.setStroke()
+            path.lineWidth = 1
+            path.stroke()
+        }
+    }
+
+    private func drawDividers() {
+        for range in dividerRanges {
+            guard let rect = contentRect(for: range) else { continue }
+            let path = NSBezierPath()
+            let y = rect.midY.rounded(.down) + 0.5
+            path.move(to: NSPoint(x: 0, y: y))
+            path.line(to: NSPoint(x: bounds.width, y: y))
+            MarkdownStyle.divider.setStroke()
             path.lineWidth = 1
             path.stroke()
         }
@@ -497,12 +570,14 @@ private final class CopyableCodeTextView: NSTextView {
         super.mouseMoved(with: event)
         let point = convert(event.locationInWindow, from: nil)
         updateCopyButton(for: point)
+        updateHoveredLink(for: point)
         updateCursor(for: point)
     }
 
     override func mouseExited(with event: NSEvent) {
         super.mouseExited(with: event)
         hideCopyButton()
+        clearHoveredLink()
     }
 
     private func updateCopyButton(for point: NSPoint) {
@@ -539,27 +614,62 @@ private final class CopyableCodeTextView: NSTextView {
             return
         }
 
-        guard
-            let characterIndex = characterIndex(at: point),
-            let textStorage,
-            characterIndex < textStorage.length
-        else {
-            NSCursor.iBeam.set()
-            return
-        }
-
-        if textStorage.attribute(.link, at: characterIndex, effectiveRange: nil) != nil {
+        if linkRange(at: point) != nil {
             NSCursor.pointingHand.set()
         } else {
             NSCursor.iBeam.set()
         }
     }
 
-    private func characterIndex(at point: NSPoint) -> Int? {
+    private func updateHoveredLink(for point: NSPoint) {
+        let range = linkRange(at: point)
+        if NSEqualRanges(range ?? NSRange(location: NSNotFound, length: 0), hoveredLinkRange ?? NSRange(location: NSNotFound, length: 0)) {
+            return
+        }
+
+        clearHoveredLink()
+        guard let range else { return }
+        layoutManager?.addTemporaryAttributes(MarkdownStyle.linkHoverAttributes, forCharacterRange: range)
+        hoveredLinkRange = range
+        needsDisplay = true
+    }
+
+    func clearHoveredLink() {
+        guard let hoveredLinkRange else { return }
+        layoutManager?.removeTemporaryAttribute(.backgroundColor, forCharacterRange: hoveredLinkRange)
+        layoutManager?.removeTemporaryAttribute(.foregroundColor, forCharacterRange: hoveredLinkRange)
+        layoutManager?.removeTemporaryAttribute(.underlineStyle, forCharacterRange: hoveredLinkRange)
+        self.hoveredLinkRange = nil
+        needsDisplay = true
+    }
+
+    private func linkRange(at point: NSPoint) -> NSRange? {
+        guard let textStorage, let characterIndex = characterIndex(at: point, requiringGlyphHit: true), characterIndex < textStorage.length else {
+            return nil
+        }
+
+        var range = NSRange(location: 0, length: 0)
+        guard textStorage.attribute(.link, at: characterIndex, effectiveRange: &range) != nil else {
+            return nil
+        }
+        return range
+    }
+
+    private func characterIndex(at point: NSPoint, requiringGlyphHit: Bool = false) -> Int? {
         guard let layoutManager, let textContainer else { return nil }
         let origin = textContainerOrigin
         let containerPoint = NSPoint(x: point.x - origin.x, y: point.y - origin.y)
         let glyphIndex = layoutManager.glyphIndex(for: containerPoint, in: textContainer)
+        guard glyphIndex < layoutManager.numberOfGlyphs else { return nil }
+        if requiringGlyphHit {
+            let glyphRect = layoutManager.boundingRect(
+                forGlyphRange: NSRange(location: glyphIndex, length: 1),
+                in: textContainer
+            )
+            guard glyphRect.insetBy(dx: -2, dy: -2).contains(containerPoint) else {
+                return nil
+            }
+        }
         return layoutManager.characterIndexForGlyph(at: glyphIndex)
     }
 
@@ -610,12 +720,14 @@ private enum MarkdownAttributedRenderer {
         headingRanges: [Int: NSRange],
         codeBlocks: [MarkdownCodeRange],
         quoteRanges: [NSRange],
+        dividerRanges: [NSRange],
         string: String
     ) {
         let result = NSMutableAttributedString()
         var headingRanges: [Int: NSRange] = [:]
         var codeBlocks: [MarkdownCodeRange] = []
         var quoteRanges: [NSRange] = []
+        var dividerRanges: [NSRange] = []
         var headingIndex = 0
 
         for block in blocks {
@@ -651,6 +763,9 @@ private enum MarkdownAttributedRenderer {
             case let .blockquote(text):
                 appendBlockquote(text, to: result, quoteRanges: &quoteRanges)
 
+            case .horizontalRule:
+                appendDivider(to: result, dividerRanges: &dividerRanges)
+
             case let .codeBlock(code, language):
                 appendSpacingIfNeeded(to: result, lines: 1)
                 appendCodeBlock(code: code, language: language, to: result, codeBlocks: &codeBlocks)
@@ -662,7 +777,7 @@ private enum MarkdownAttributedRenderer {
             result.deleteCharacters(in: NSRange(location: result.length - 1, length: 1))
         }
 
-        return (result, headingRanges, codeBlocks, quoteRanges, result.string)
+        return (result, headingRanges, codeBlocks, quoteRanges, dividerRanges, result.string)
     }
 
     private static func appendCodeBlock(
@@ -752,6 +867,23 @@ private enum MarkdownAttributedRenderer {
         ))
         let range = NSRange(location: start, length: max(result.length - start, 1))
         quoteRanges.append(range)
+        result.append(NSAttributedString(string: "\n"))
+    }
+
+    private static func appendDivider(to result: NSMutableAttributedString, dividerRanges: inout [NSRange]) {
+        appendSpacingIfNeeded(to: result, lines: 1)
+        let style = paragraphStyle(lineSpacing: 0, paragraphSpacing: 10)
+        style.minimumLineHeight = 20
+        style.maximumLineHeight = 20
+        let start = result.length
+        result.append(NSAttributedString(
+            string: " ",
+            attributes: [
+                .font: MarkdownStyle.bodyFont,
+                .paragraphStyle: style
+            ]
+        ))
+        dividerRanges.append(NSRange(location: start, length: 1))
         result.append(NSAttributedString(string: "\n"))
     }
 
@@ -880,6 +1012,10 @@ private enum MarkdownCompactAttributedRenderer {
                     color: .tertiaryLabelColor,
                     paragraphStyle: paragraphStyle(lineSpacing: 4, paragraphSpacing: 5, headIndent: 12)
                 ))
+                result.append(NSAttributedString(string: "\n"))
+
+            case .horizontalRule:
+                appendSpacingIfNeeded(to: result)
                 result.append(NSAttributedString(string: "\n"))
 
             case let .codeBlock(code, _):
@@ -1019,6 +1155,7 @@ private enum MarkdownStyle {
     static let listMarker = dynamic(light: 0x4C6F9B, dark: 0x8FB3DE)
     static let quoteText = dynamic(light: 0x5B6370, dark: 0xB7BECA)
     static let quoteBar = dynamic(light: 0x8AA1BA, dark: 0x5F7FA4)
+    static let divider = dynamic(light: 0xD5DAE2, dark: 0x3B4654)
 
     // Code blocks always render on a dark panel for a consistent, premium look.
     static let codeBackground = NSColor(srgbRed: 0.145, green: 0.157, blue: 0.176, alpha: 1)
@@ -1028,6 +1165,16 @@ private enum MarkdownStyle {
     static let inlineCodeText = dynamic(light: 0xB5446E, dark: 0xF2A6C2)
     static let inlineCodeBackground = NSColor(name: nil) { appearance in
         appearance.isDark ? NSColor.white.withAlphaComponent(0.10) : NSColor.black.withAlphaComponent(0.06)
+    }
+    static let linkHoverBackground = NSColor(name: nil) { appearance in
+        appearance.isDark ? NSColor.linkColor.withAlphaComponent(0.24) : NSColor.linkColor.withAlphaComponent(0.14)
+    }
+    static var linkHoverAttributes: [NSAttributedString.Key: Any] {
+        [
+            .foregroundColor: NSColor.linkColor,
+            .backgroundColor: linkHoverBackground,
+            .underlineStyle: NSUnderlineStyle.single.rawValue
+        ]
     }
 
     static func dynamic(light: Int, dark: Int) -> NSColor {
@@ -1210,6 +1357,7 @@ struct MarkdownBlock: Identifiable {
         case unorderedList([String])
         case orderedList([String])
         case blockquote(String)
+        case horizontalRule
         case codeBlock(code: String, language: String?)
     }
 }
@@ -1308,6 +1456,12 @@ enum MarkdownBlockParser {
                 continue
             }
 
+            if isHorizontalRule(trimmed) {
+                flushOpenBlocks()
+                blocks.append(MarkdownBlock(kind: .horizontalRule))
+                continue
+            }
+
             if let heading = heading(from: trimmed) {
                 flushOpenBlocks()
                 blocks.append(MarkdownBlock(kind: .heading(level: heading.level, text: heading.text)))
@@ -1390,6 +1544,14 @@ enum MarkdownBlockParser {
             return String(content.dropFirst())
         }
         return String(content)
+    }
+
+    private static func isHorizontalRule(_ line: String) -> Bool {
+        let markers = line.filter { !$0.isWhitespace }
+        guard markers.count >= 3, let marker = markers.first, marker == "-" || marker == "*" || marker == "_" else {
+            return false
+        }
+        return markers.allSatisfy { $0 == marker }
     }
 
     private static func unorderedListItem(from line: String) -> String? {

@@ -128,6 +128,27 @@ import Testing
     #expect(store.tasks.isEmpty)
 }
 
+@Test func markdownParserRecognizesHorizontalRules() {
+    let blocks = MarkdownBlockParser.parse(
+        """
+        上半部分
+        ---
+        下半部分
+        """
+    )
+
+    #expect(blocks.count == 3)
+    if case .paragraph("上半部分") = blocks[0].kind {} else {
+        Issue.record("Expected first block to be a paragraph.")
+    }
+    if case .horizontalRule = blocks[1].kind {} else {
+        Issue.record("Expected --- to be parsed as a horizontal rule.")
+    }
+    if case .paragraph("下半部分") = blocks[2].kind {} else {
+        Issue.record("Expected final block to be a paragraph.")
+    }
+}
+
 @MainActor
 @Test func taskStoreUpdatesAndPersistsTaskNotes() throws {
     let urls = temporaryStoreURLs()
