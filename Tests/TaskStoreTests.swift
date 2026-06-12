@@ -149,6 +149,51 @@ import Testing
     }
 }
 
+@Test @MainActor func markdownImageResolverResolvesRelativeNotePaths() throws {
+    let base = URL(fileURLWithPath: "/tmp/notes", isDirectory: true)
+    let markdown = "![截图](./screenshot.png)"
+    let attributed = try NSMutableAttributedString(
+        markdown: markdown,
+        options: AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace),
+        baseURL: base
+    )
+    let key = NSAttributedString.Key("NSImageURL")
+    var resolved: URL?
+    attributed.enumerateAttribute(key, in: NSRange(location: 0, length: attributed.length)) { value, _, _ in
+        if let raw = value as? URL {
+            resolved = MarkdownImageAttachmentRenderer.resolveImageURL(raw, baseURL: base)
+        }
+    }
+    #expect(resolved?.path == "/tmp/notes/screenshot.png")
+}
+
+@Test @MainActor func markdownPreviewEmbedsLocalImageAttachment() throws {
+    let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+
+    let imageURL = directory.appending(path: "preview.png")
+    try testPNG.write(to: imageURL)
+
+    let markdown = "![截图](./preview.png)"
+    guard let attributed = try? NSMutableAttributedString(
+        markdown: markdown,
+        options: AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace),
+        baseURL: directory
+    ) else {
+        Issue.record("Expected markdown image syntax to parse.")
+        return
+    }
+
+    MarkdownImageAttachmentRenderer.applyImageAttachments(
+        to: attributed,
+        baseURL: directory,
+        fallbackAttributes: [:]
+    )
+
+    #expect(attributed.string.contains("\u{FFFC}"))
+}
+
 @MainActor
 @Test func taskStoreUpdatesAndPersistsTaskNotes() throws {
     let urls = temporaryStoreURLs()

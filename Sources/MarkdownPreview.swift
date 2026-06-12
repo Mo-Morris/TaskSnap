@@ -1,13 +1,125 @@
 import AppKit
 import SwiftUI
 
+// MARK: - Image preview sheet
+
+struct MarkdownPreviewImageItem: Identifiable {
+    let id = UUID()
+    let image: NSImage
+    let title: String?
+}
+
+@MainActor
+enum MarkdownImageZoomLayout {
+    /// Inline preview: large enough to read, still smaller than the zoom sheet.
+    static let inlineMaxWidth: CGFloat = 720
+    static let sheetScreenCoverage: CGFloat = 0.92
+    static let sheetHeaderHeight: CGFloat = 52
+    static let sheetPadding: CGFloat = 32
+    static let sheetMinimumSize = CGSize(width: 720, height: 540)
+
+    static func sheetSize(for image: NSImage) -> CGSize {
+        let screen = NSScreen.main?.visibleFrame.size ?? CGSize(width: 1280, height: 800)
+        let maxContentWidth = screen.width * sheetScreenCoverage - sheetPadding
+        let maxContentHeight = screen.height * sheetScreenCoverage - sheetHeaderHeight - sheetPadding
+
+        let imageSize = image.size
+        guard imageSize.width > 0, imageSize.height > 0 else {
+            return CGSize(
+                width: max(sheetMinimumSize.width, screen.width * sheetScreenCoverage),
+                height: max(sheetMinimumSize.height, screen.height * sheetScreenCoverage)
+            )
+        }
+
+        let aspect = imageSize.width / imageSize.height
+        var contentWidth = min(imageSize.width, maxContentWidth)
+        var contentHeight = contentWidth / aspect
+
+        if contentHeight > maxContentHeight {
+            contentHeight = maxContentHeight
+            contentWidth = contentHeight * aspect
+        }
+
+        // Upscale small images so the zoom sheet still feels like a real enlargement.
+        let minZoomedEdge = min(560, min(maxContentWidth, maxContentHeight) * 0.65)
+        if max(contentWidth, contentHeight) < minZoomedEdge {
+            if contentWidth >= contentHeight {
+                contentWidth = minZoomedEdge
+                contentHeight = contentWidth / aspect
+            } else {
+                contentHeight = minZoomedEdge
+                contentWidth = contentHeight * aspect
+            }
+
+            if contentWidth > maxContentWidth {
+                contentWidth = maxContentWidth
+                contentHeight = contentWidth / aspect
+            }
+            if contentHeight > maxContentHeight {
+                contentHeight = maxContentHeight
+                contentWidth = contentHeight * aspect
+            }
+        }
+
+        return CGSize(
+            width: max(sheetMinimumSize.width, contentWidth + sheetPadding),
+            height: max(sheetMinimumSize.height, contentHeight + sheetHeaderHeight + sheetPadding)
+        )
+    }
+}
+
+private struct MarkdownImagePreviewSheet: View {
+    let item: MarkdownPreviewImageItem
+    @Environment(\.dismiss) private var dismiss
+
+    private var sheetSize: CGSize {
+        MarkdownImageZoomLayout.sheetSize(for: item.image)
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 10) {
+                Text(item.title?.isEmpty == false ? item.title! : "图片")
+                    .font(.headline)
+                    .lineLimit(1)
+
+                Spacer()
+
+                Button {
+                    dismiss()
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.title3)
+                }
+                .buttonStyle(.borderless)
+                .foregroundStyle(.secondary)
+                .help("关闭")
+            }
+            .padding(14)
+
+            GeometryReader { proxy in
+                Image(nsImage: item.image)
+                    .resizable()
+                    .interpolation(.high)
+                    .scaledToFit()
+                    .frame(width: proxy.size.width, height: proxy.size.height)
+            }
+            .padding(16)
+            .background(Color.black.opacity(0.06))
+        }
+        .frame(width: sheetSize.width, height: sheetSize.height)
+    }
+}
+
 // MARK: - Public preview view
 
 struct MarkdownPreviewView: View {
     let markdown: String
     let isOutlineVisible: Bool
+    var baseURL: URL? = nil
 
     @State private var selectedOutlineItemID: Int?
+    @State private var previewImageItem: MarkdownPreviewImageItem?
 
     private var blocks: [MarkdownBlock] {
         MarkdownBlockParser.parse(markdown)
@@ -34,7 +146,11 @@ struct MarkdownPreviewView: View {
             HStack(alignment: .top, spacing: 24) {
                 SelectableMarkdownTextView(
                     blocks: currentBlocks,
-                    selectedOutlineItemID: selectedOutlineItemID
+                    selectedOutlineItemID: selectedOutlineItemID,
+                    baseURL: baseURL,
+                    onImagePreview: { item in
+                        previewImageItem = item
+                    }
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
 
@@ -51,6 +167,9 @@ struct MarkdownPreviewView: View {
         .padding(.horizontal, 52)
         .padding(.vertical, 30)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .sheet(item: $previewImageItem) { item in
+            MarkdownImagePreviewSheet(item: item)
+        }
     }
 }
 
@@ -335,6 +454,8 @@ private struct MarkdownOutlineView: View {
 private struct SelectableMarkdownTextView: NSViewRepresentable {
     let blocks: [MarkdownBlock]
     let selectedOutlineItemID: Int?
+    let baseURL: URL?
+    var onImagePreview: ((MarkdownPreviewImageItem) -> Void)? = nil
 
     func makeNSView(context: Context) -> NSScrollView {
         let scrollView = NSScrollView()
@@ -366,6 +487,8 @@ private struct SelectableMarkdownTextView: NSViewRepresentable {
             .underlineStyle: NSUnderlineStyle.single.rawValue
         ]
 
+        textView.onImagePreview = onImagePreview
+
         scrollView.documentView = textView
         context.coordinator.textView = textView
         applyContent(to: textView, context: context)
@@ -375,6 +498,7 @@ private struct SelectableMarkdownTextView: NSViewRepresentable {
 
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
         guard let textView = context.coordinator.textView else { return }
+        textView.onImagePreview = onImagePreview
         applyContent(to: textView, context: context)
         context.coordinator.scrollToHeadingIfNeeded(selectedOutlineItemID)
     }
@@ -384,7 +508,7 @@ private struct SelectableMarkdownTextView: NSViewRepresentable {
     }
 
     private func applyContent(to textView: CopyableCodeTextView, context: Context) {
-        let rendered = MarkdownAttributedRenderer.render(blocks)
+        let rendered = MarkdownAttributedRenderer.render(blocks, baseURL: baseURL)
         guard context.coordinator.lastRenderedText != rendered.string else { return }
 
         textView.clearHoveredLink()
@@ -438,6 +562,8 @@ private final class PointingHandCodeCopyButton: NSButton {
 }
 
 private final class CopyableCodeTextView: NSTextView {
+    var onImagePreview: ((MarkdownPreviewImageItem) -> Void)?
+
     var codeBlocks: [MarkdownCodeRange] = [] {
         didSet { needsDisplay = true }
     }
@@ -587,6 +713,16 @@ private final class CopyableCodeTextView: NSTextView {
         trackingArea = area
     }
 
+    override func mouseDown(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        if let attachment = imageAttachment(at: point) {
+            onImagePreview?(MarkdownPreviewImageItem(image: attachment.previewImage, title: attachment.altText))
+            return
+        }
+
+        super.mouseDown(with: event)
+    }
+
     override func mouseMoved(with event: NSEvent) {
         super.mouseMoved(with: event)
         let point = convert(event.locationInWindow, from: nil)
@@ -635,7 +771,7 @@ private final class CopyableCodeTextView: NSTextView {
             return
         }
 
-        if linkRange(at: point) != nil {
+        if imageAttachment(at: point) != nil || linkRange(at: point) != nil {
             NSCursor.pointingHand.set()
         } else {
             NSCursor.iBeam.set()
@@ -662,6 +798,18 @@ private final class CopyableCodeTextView: NSTextView {
         layoutManager?.removeTemporaryAttribute(.underlineStyle, forCharacterRange: hoveredLinkRange)
         self.hoveredLinkRange = nil
         needsDisplay = true
+    }
+
+    private func imageAttachment(at point: NSPoint) -> MarkdownImageTextAttachment? {
+        guard
+            let characterIndex = characterIndex(at: point, requiringGlyphHit: true),
+            let textStorage,
+            let attachment = textStorage.attribute(.attachment, at: characterIndex, effectiveRange: nil) as? MarkdownImageTextAttachment
+        else {
+            return nil
+        }
+
+        return attachment
     }
 
     private func linkRange(at point: NSPoint) -> NSRange? {
@@ -752,11 +900,136 @@ private final class CopyableCodeTextView: NSTextView {
     }
 }
 
+
+// MARK: - Markdown image attachments
+
+@MainActor
+final class MarkdownImageTextAttachment: NSTextAttachment {
+    let previewImage: NSImage
+    let sourceURL: URL?
+    let altText: String?
+
+    init(image: NSImage, sourceURL: URL?, altText: String?) {
+        self.previewImage = image
+        self.sourceURL = sourceURL
+        self.altText = altText
+        super.init(data: nil, ofType: nil)
+        self.image = image
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        nil
+    }
+}
+
+@MainActor
+enum MarkdownImageAttachmentRenderer {
+    static let imageURLKey = NSAttributedString.Key("NSImageURL")
+    static let defaultMaxImageWidth: CGFloat = MarkdownImageZoomLayout.inlineMaxWidth
+
+    static func resolveImageURL(_ raw: URL, baseURL: URL?) -> URL? {
+        if raw.scheme == "http" || raw.scheme == "https" || raw.scheme == "data" {
+            return raw
+        }
+
+        let composite = String(describing: raw)
+        if composite.contains(" -- ") {
+            let parts = composite.components(separatedBy: " -- ")
+            let reference = parts[0]
+            if reference.hasPrefix("/") {
+                return URL(fileURLWithPath: reference)
+            }
+
+            if var resolvedBase = parts.count > 1 ? URL(string: parts[1]) : baseURL {
+                if !resolvedBase.hasDirectoryPath {
+                    resolvedBase = URL(fileURLWithPath: resolvedBase.path, isDirectory: true)
+                }
+                return URL(string: reference, relativeTo: resolvedBase)?.standardizedFileURL
+            }
+        }
+
+        if raw.isFileURL {
+            return raw.standardizedFileURL
+        }
+
+        if let baseURL {
+            let rawString = raw.absoluteString.removingPercentEncoding ?? raw.absoluteString
+            return URL(string: rawString, relativeTo: baseURL)?.standardizedFileURL
+        }
+
+        return raw
+    }
+
+    static func loadImage(from url: URL) -> NSImage? {
+        if url.scheme == "data" {
+            return imageFromDataURL(url.absoluteString)
+        }
+        return NSImage(contentsOf: url)
+    }
+
+    private static func imageFromDataURL(_ dataURL: String) -> NSImage? {
+        guard let commaIndex = dataURL.firstIndex(of: ",") else { return nil }
+        let payload = String(dataURL[dataURL.index(after: commaIndex)...])
+        guard let data = Data(base64Encoded: payload) else { return nil }
+        return NSImage(data: data)
+    }
+
+    static func applyImageAttachments(
+        to attributed: NSMutableAttributedString,
+        baseURL: URL?,
+        maxImageWidth: CGFloat = defaultMaxImageWidth,
+        fallbackAttributes: [NSAttributedString.Key: Any]
+    ) {
+        let fullRange = NSRange(location: 0, length: attributed.length)
+        var replacements: [(NSRange, NSAttributedString)] = []
+
+        attributed.enumerateAttribute(imageURLKey, in: fullRange) { value, range, _ in
+            guard let raw = value as? URL else { return }
+
+            let alt = (attributed.string as NSString).substring(with: range)
+            if let resolved = resolveImageURL(raw, baseURL: baseURL),
+               let image = loadImage(from: resolved),
+               image.size.width > 0,
+               image.size.height > 0 {
+                let attachment = makeAttachment(
+                    image: image,
+                    sourceURL: resolved,
+                    altText: alt.isEmpty ? nil : alt,
+                    maxWidth: maxImageWidth
+                )
+                replacements.append((range, NSAttributedString(attachment: attachment)))
+            } else {
+                let label = alt.isEmpty ? "[图片]" : "[图片: \(alt)]"
+                replacements.append((range, NSAttributedString(string: label, attributes: fallbackAttributes)))
+            }
+        }
+
+        for (range, replacement) in replacements.sorted(by: { $0.0.location > $1.0.location }) {
+            attributed.replaceCharacters(in: range, with: replacement)
+        }
+    }
+
+    private static func makeAttachment(
+        image: NSImage,
+        sourceURL: URL?,
+        altText: String?,
+        maxWidth: CGFloat
+    ) -> MarkdownImageTextAttachment {
+        let attachment = MarkdownImageTextAttachment(image: image, sourceURL: sourceURL, altText: altText)
+
+        let width = min(image.size.width, maxWidth)
+        let height = width * (image.size.height / image.size.width)
+        attachment.bounds = CGRect(x: 0, y: -4, width: width, height: height)
+        return attachment
+    }
+}
+
 // MARK: - Attributed renderer
 
 @MainActor
 private enum MarkdownAttributedRenderer {
-    static func render(_ blocks: [MarkdownBlock]) -> (
+    static func render(_ blocks: [MarkdownBlock], baseURL: URL? = nil) -> (
         attributedString: NSAttributedString,
         headingRanges: [Int: NSRange],
         codeBlocks: [MarkdownCodeRange],
@@ -780,7 +1053,8 @@ private enum MarkdownAttributedRenderer {
                     text,
                     font: headingFont(for: level),
                     color: .labelColor,
-                    paragraphStyle: paragraphStyle(lineSpacing: 1.5, paragraphSpacing: 4)
+                    paragraphStyle: paragraphStyle(lineSpacing: 1.5, paragraphSpacing: 4),
+                    baseURL: baseURL
                 ))
                 headingRanges[headingIndex] = NSRange(location: start, length: max(result.length - start, 1))
                 headingIndex += 1
@@ -791,18 +1065,19 @@ private enum MarkdownAttributedRenderer {
                     text,
                     font: MarkdownStyle.bodyFont,
                     color: MarkdownStyle.bodyText,
-                    paragraphStyle: paragraphStyle(lineSpacing: 4, paragraphSpacing: 6)
+                    paragraphStyle: paragraphStyle(lineSpacing: 4, paragraphSpacing: 6),
+                    baseURL: baseURL
                 ))
                 result.append(NSAttributedString(string: "\n"))
 
             case let .unorderedList(items):
-                appendList(items, ordered: false, to: result)
+                appendList(items, ordered: false, to: result, baseURL: baseURL)
 
             case let .orderedList(items):
-                appendList(items, ordered: true, to: result)
+                appendList(items, ordered: true, to: result, baseURL: baseURL)
 
             case let .blockquote(text):
-                appendBlockquote(text, to: result, quoteRanges: &quoteRanges)
+                appendBlockquote(text, to: result, quoteRanges: &quoteRanges, baseURL: baseURL)
 
             case .horizontalRule:
                 appendDivider(to: result, dividerRanges: &dividerRanges)
@@ -872,7 +1147,7 @@ private enum MarkdownAttributedRenderer {
         result.append(NSAttributedString(string: "\n\n"))
     }
 
-    private static func appendList(_ items: [String], ordered: Bool, to result: NSMutableAttributedString) {
+    private static func appendList(_ items: [String], ordered: Bool, to result: NSMutableAttributedString, baseURL: URL?) {
         let style = paragraphStyle(lineSpacing: 4, paragraphSpacing: 4, headIndent: 26)
         for (index, item) in items.enumerated() {
             let marker = ordered ? "\(index + 1). " : "•  "
@@ -888,14 +1163,15 @@ private enum MarkdownAttributedRenderer {
                 item,
                 font: MarkdownStyle.bodyFont,
                 color: MarkdownStyle.bodyText,
-                paragraphStyle: style
+                paragraphStyle: style,
+                baseURL: baseURL
             ))
             result.append(NSAttributedString(string: index == items.count - 1 ? "\n" : "\n"))
         }
         result.append(NSAttributedString(string: "\n"))
     }
 
-    private static func appendBlockquote(_ text: String, to result: NSMutableAttributedString, quoteRanges: inout [NSRange]) {
+    private static func appendBlockquote(_ text: String, to result: NSMutableAttributedString, quoteRanges: inout [NSRange], baseURL: URL?) {
         appendSpacingIfNeeded(to: result, lines: 1)
         let start = result.length
         let style = paragraphStyle(lineSpacing: 4, paragraphSpacing: 6, headIndent: 18)
@@ -904,7 +1180,8 @@ private enum MarkdownAttributedRenderer {
             text,
             font: MarkdownStyle.bodyFont,
             color: MarkdownStyle.quoteText,
-            paragraphStyle: style
+            paragraphStyle: style,
+                baseURL: baseURL
         ))
         let range = NSRange(location: start, length: max(result.length - start, 1))
         quoteRanges.append(range)
@@ -932,7 +1209,8 @@ private enum MarkdownAttributedRenderer {
         _ markdown: String,
         font: NSFont,
         color: NSColor,
-        paragraphStyle: NSParagraphStyle
+        paragraphStyle: NSParagraphStyle,
+        baseURL: URL?
     ) -> NSAttributedString {
         let baseAttributes: [NSAttributedString.Key: Any] = [
             .font: font,
@@ -943,7 +1221,7 @@ private enum MarkdownAttributedRenderer {
         guard let attributed = try? NSMutableAttributedString(
             markdown: markdown,
             options: AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace),
-            baseURL: nil
+            baseURL: baseURL
         ) else {
             return NSAttributedString(string: markdown, attributes: baseAttributes)
         }
@@ -973,6 +1251,11 @@ private enum MarkdownAttributedRenderer {
                 attributed.addAttribute(.font, value: styled, range: range)
             }
         }
+        MarkdownImageAttachmentRenderer.applyImageAttachments(
+            to: attributed,
+            baseURL: baseURL,
+            fallbackAttributes: baseAttributes
+        )
 
         return attributed
     }

@@ -1,4 +1,5 @@
 import AppKit
+import Carbon.HIToolbox
 import SwiftUI
 
 @MainActor
@@ -168,8 +169,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var openSettingsWindow: (() -> Void)?
     private var pasteEventMonitor: Any?
     private var statusItem: NSStatusItem?
+    private var hotKeyEventHandler: EventHandlerRef?
+    private var hotKeyRefs: [EventHotKeyRef?] = []
 
     private static let dockWindowTitles: Set<String> = ["任务笔记", "归档管理"]
+    private static weak var activeDelegate: AppDelegate?
+    private static let hotKeySignature = fourCharacterCode("TSNP")
+
+    private enum HotKey: UInt32 {
+        case toggleMainWindow = 1
+        case toggleNoteWindow = 2
+    }
 
     @objc private func documentWindowStateMayHaveChanged(_ notification: Notification) {
         DispatchQueue.main.async { [weak self] in
@@ -207,9 +217,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        Self.activeDelegate = self
         NSApp.applicationIconImage = AppIcon.makeImage()
         NSApp.setActivationPolicy(.accessory)
         installStatusItem()
+        installGlobalHotKeys()
         hideMainWindowOnLaunch()
         NotificationCenter.default.addObserver(
             self,
@@ -234,6 +246,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
             self?.pasteCommandDispatcher?.requestPaste()
             return nil
+        }
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        hotKeyRefs.forEach { hotKeyRef in
+            if let hotKeyRef {
+                UnregisterEventHotKey(hotKeyRef)
+            }
+        }
+
+        if let hotKeyEventHandler {
+            RemoveEventHandler(hotKeyEventHandler)
         }
     }
 
@@ -275,6 +299,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.windows.first { $0.title == "TaskSnap" }
     }
 
+    private func noteWindow() -> NSWindow? {
+        NSApp.windows.first { $0.title == "任务笔记" }
+    }
+
     @objc private func statusItemClicked(_ sender: Any?) {
         presentStatusMenu()
     }
@@ -296,8 +324,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let toggleVisibilityItem = NSMenuItem(
             title: isWindowVisible ? "隐藏浮窗" : "显示浮窗",
             action: #selector(menuToggleMainWindowVisibility),
-            keyEquivalent: ""
+            keyEquivalent: "o"
         )
+        toggleVisibilityItem.keyEquivalentModifierMask = [.control, .shift]
         toggleVisibilityItem.target = self
         menu.addItem(toggleVisibilityItem)
 
@@ -310,13 +339,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         collapseToggleItem.target = self
         menu.addItem(collapseToggleItem)
 
-        let openNoteItem = NSMenuItem(
-            title: "打开任务笔记",
-            action: #selector(menuOpenNoteWindow),
-            keyEquivalent: ""
+        let isNoteWindowVisible = noteWindow()?.isVisible == true
+        let toggleNoteWindowItem = NSMenuItem(
+            title: isNoteWindowVisible ? "隐藏任务笔记" : "打开任务笔记",
+            action: #selector(menuToggleNoteWindowVisibility),
+            keyEquivalent: "i"
         )
-        openNoteItem.target = self
-        menu.addItem(openNoteItem)
+        toggleNoteWindowItem.keyEquivalentModifierMask = [.control, .shift]
+        toggleNoteWindowItem.target = self
+        menu.addItem(toggleNoteWindowItem)
 
         let manualTaskItem = NSMenuItem(
             title: "新建手动任务",
@@ -381,8 +412,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if window.isVisible {
             window.orderOut(nil)
         } else {
-            NSApp.activate(ignoringOtherApps: true)
-            window.makeKeyAndOrderFront(nil)
+            showMainWindowIfNeeded()
         }
     }
 
@@ -392,7 +422,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         showMainWindowIfNeeded()
     }
 
-    @objc private func menuOpenNoteWindow() {
+    @objc private func menuToggleNoteWindowVisibility() {
+        if let window = noteWindow(), window.isVisible {
+            window.orderOut(nil)
+            return
+        }
+
         shellState?.noteTaskListScope = .all
         NSApp.activate(ignoringOtherApps: true)
         openNoteWindow?()
@@ -442,6 +477,83 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.activate(ignoringOtherApps: true)
     }
 
+    private func installGlobalHotKeys() {
+        let eventSpec = EventTypeSpec(
+            eventClass: OSType(kEventClassKeyboard),
+            eventKind: UInt32(kEventHotKeyPressed)
+        )
+
+        let handlerStatus = InstallEventHandler(
+            GetApplicationEventTarget(),
+            { _, event, _ -> OSStatus in
+                var hotKeyID = EventHotKeyID()
+                let status = GetEventParameter(
+                    event,
+                    EventParamName(kEventParamDirectObject),
+                    EventParamType(typeEventHotKeyID),
+                    nil,
+                    MemoryLayout<EventHotKeyID>.size,
+                    nil,
+                    &hotKeyID
+                )
+
+                guard
+                    status == noErr,
+                    hotKeyID.signature == AppDelegate.hotKeySignature,
+                    let hotKey = HotKey(rawValue: hotKeyID.id)
+                else {
+                    return status
+                }
+
+                DispatchQueue.main.async {
+                    AppDelegate.activeDelegate?.handleGlobalHotKey(hotKey)
+                }
+
+                return noErr
+            },
+            1,
+            [eventSpec],
+            nil,
+            &hotKeyEventHandler
+        )
+
+        guard handlerStatus == noErr else {
+            NSLog("TaskSnap failed to install global hotkey handler: \(handlerStatus)")
+            return
+        }
+
+        registerHotKey(.toggleMainWindow, keyCode: UInt32(kVK_ANSI_O))
+        registerHotKey(.toggleNoteWindow, keyCode: UInt32(kVK_ANSI_I))
+    }
+
+    private func registerHotKey(_ hotKey: HotKey, keyCode: UInt32) {
+        let hotKeyID = EventHotKeyID(signature: Self.hotKeySignature, id: hotKey.rawValue)
+        var hotKeyRef: EventHotKeyRef?
+        let status = RegisterEventHotKey(
+            keyCode,
+            UInt32(controlKey | shiftKey),
+            hotKeyID,
+            GetApplicationEventTarget(),
+            0,
+            &hotKeyRef
+        )
+
+        if status == noErr {
+            hotKeyRefs.append(hotKeyRef)
+        } else {
+            NSLog("TaskSnap failed to register hotkey \(hotKey.rawValue): \(status)")
+        }
+    }
+
+    private func handleGlobalHotKey(_ hotKey: HotKey) {
+        switch hotKey {
+        case .toggleMainWindow:
+            menuToggleMainWindowVisibility()
+        case .toggleNoteWindow:
+            menuToggleNoteWindowVisibility()
+        }
+    }
+
     private var shouldHandleScreenshotPaste: Bool {
         guard let keyWindow = NSApp.keyWindow, keyWindow.title == "TaskSnap" else {
             return false
@@ -449,4 +561,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         return !(keyWindow.firstResponder is NSTextView)
     }
+}
+
+private func fourCharacterCode(_ string: String) -> OSType {
+    string.utf8.reduce(0) { ($0 << 8) + OSType($1) }
 }

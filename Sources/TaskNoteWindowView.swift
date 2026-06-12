@@ -297,7 +297,11 @@ struct TaskNoteWindowView: View {
                             .frame(maxWidth: .infinity, alignment: .top)
                         }
                     } else {
-                        MarkdownPreviewView(markdown: document.previewMarkdown, isOutlineVisible: isOutlineVisible)
+                        MarkdownPreviewView(
+                            markdown: document.previewMarkdown,
+                            isOutlineVisible: isOutlineVisible,
+                            baseURL: selectedNote.fileURL.deletingLastPathComponent()
+                        )
                     }
                 case .markdown:
                     MarkdownEditorView(

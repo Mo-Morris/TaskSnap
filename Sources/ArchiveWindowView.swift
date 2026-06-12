@@ -277,7 +277,11 @@ struct ArchiveWindowView: View {
                             .stroke(Color.black.opacity(0.08), lineWidth: 1)
                     }
             } else {
-                MarkdownPreviewView(markdown: markdown, isOutlineVisible: false)
+                MarkdownPreviewView(
+                    markdown: markdown,
+                    isOutlineVisible: false,
+                    baseURL: firstNote.map { $0.fileURL.deletingLastPathComponent() }
+                )
                     .frame(maxWidth: .infinity, minHeight: 240, alignment: .topLeading)
                     .background(Color(nsColor: .textBackgroundColor))
                     .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
