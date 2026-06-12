@@ -6,12 +6,24 @@ import SwiftUI
 final class AppShellState: ObservableObject {
     @Published var isMainWindowCollapsed: Bool = false
     @Published var selectedNoteTaskID: TaskItem.ID?
-    @Published var noteTaskListScope: NoteTaskListScope = .all
+    @Published var noteTaskListScope: NoteTaskListScope {
+        didSet {
+            UserDefaults.standard.set(noteTaskListScope.rawValue, forKey: NoteTaskListScope.storageKey)
+        }
+    }
     @Published var selectedArchivedTaskID: TaskItem.ID?
     @Published var manualTaskFormRequestID: Int = 0
+
+    init() {
+        let storedScope = UserDefaults.standard.string(forKey: NoteTaskListScope.storageKey)
+            .flatMap(NoteTaskListScope.init(rawValue:))
+        noteTaskListScope = storedScope ?? .all
+    }
 }
 
-enum NoteTaskListScope {
+enum NoteTaskListScope: String {
+    static let storageKey = "TaskSnap.noteTaskListScope"
+
     case all
     case selectedOnly
 }
@@ -428,7 +440,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        shellState?.noteTaskListScope = .all
         NSApp.activate(ignoringOtherApps: true)
         openNoteWindow?()
     }

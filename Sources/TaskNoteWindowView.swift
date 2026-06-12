@@ -1,4 +1,4 @@
-import AppKit
+@preconcurrency import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -17,7 +17,16 @@ struct TaskNoteWindowView: View {
     @State private var noteCreationTask: TaskItem?
     @State private var isTaskSidebarCollapsed = false
     @State private var isOutlineVisible = true
+    @State private var sidebarDragStartWidth: Double?
+    @AppStorage("TaskSnap.noteSidebarWidth") private var sidebarWidth = 292.0
+    @AppStorage("TaskSnap.noteWindowZoomScale") private var noteWindowZoomScale = 1.0
     @FocusState private var isEditorFocused: Bool
+
+    private let minSidebarWidth = 220.0
+    private let maxSidebarWidth = 460.0
+    private let minNoteWindowZoomScale = 0.8
+    private let maxNoteWindowZoomScale = 1.35
+    private let noteWindowZoomStep = 0.1
 
     private var visibleTasks: [TaskItem] {
         store.visibleTasks
@@ -108,6 +117,46 @@ struct TaskNoteWindowView: View {
     }
 
     private var noteWindow: some View {
+        let zoomScale = CGFloat(noteWindowZoomScale)
+
+        return GeometryReader { proxy in
+            noteWindowContent
+                .frame(
+                    width: max(proxy.size.width / zoomScale, 1),
+                    height: max(proxy.size.height / zoomScale, 1),
+                    alignment: .topLeading
+                )
+                .scaleEffect(zoomScale, anchor: .topLeading)
+        }
+        .frame(minWidth: 820, minHeight: 560)
+        .overlay {
+            noteWindowZoomShortcuts
+        }
+    }
+
+    private var noteWindowZoomShortcuts: some View {
+        VStack {
+            Button("") {
+                adjustNoteWindowZoom(by: noteWindowZoomStep)
+            }
+            .keyboardShortcut("=", modifiers: .command)
+
+            Button("") {
+                adjustNoteWindowZoom(by: noteWindowZoomStep)
+            }
+            .keyboardShortcut("+", modifiers: .command)
+
+            Button("") {
+                adjustNoteWindowZoom(by: -noteWindowZoomStep)
+            }
+            .keyboardShortcut("-", modifiers: .command)
+        }
+        .frame(width: 0, height: 0)
+        .opacity(0)
+        .accessibilityHidden(true)
+    }
+
+    private var noteWindowContent: some View {
         HStack(spacing: 0) {
             if isTaskSidebarCollapsed {
                 collapsedTaskSidebar
@@ -115,11 +164,19 @@ struct TaskNoteWindowView: View {
                 taskTitleSidebar
             }
 
-            Divider()
+            ResizableNoteSidebarDivider(isActive: sidebarDragStartWidth != nil) { translation in
+                if sidebarDragStartWidth == nil {
+                    sidebarDragStartWidth = sidebarWidth
+                }
+
+                let startWidth = sidebarDragStartWidth ?? sidebarWidth
+                sidebarWidth = clampedSidebarWidth(startWidth + Double(translation.width) / noteWindowZoomScale)
+            } onEnded: {
+                sidebarDragStartWidth = nil
+            }
 
             documentPane
         }
-        .frame(minWidth: 820, minHeight: 560)
     }
 
     private var taskTitleSidebar: some View {
@@ -137,6 +194,15 @@ struct TaskNoteWindowView: View {
                     }
                 }
             }
+
+            Picker("笔记范围", selection: $taskListScope) {
+                Text("当前").tag(NoteTaskListScope.selectedOnly)
+                Text("全部").tag(NoteTaskListScope.all)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .controlSize(.small)
+            .help("切换当前任务笔记或全部任务笔记")
 
             ScrollView {
                 VStack(spacing: 10) {
@@ -170,7 +236,7 @@ struct TaskNoteWindowView: View {
             }
         }
         .padding(18)
-        .frame(width: 292)
+        .frame(width: sidebarWidth)
         .frame(maxHeight: .infinity, alignment: .topLeading)
         .background(Color(nsColor: .controlBackgroundColor).opacity(0.46))
     }
@@ -487,7 +553,80 @@ struct TaskNoteWindowView: View {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
     }
+
+    private func adjustNoteWindowZoom(by delta: Double) {
+        noteWindowZoomScale = min(max(noteWindowZoomScale + delta, minNoteWindowZoomScale), maxNoteWindowZoomScale)
+    }
+
+    private func clampedSidebarWidth(_ width: Double) -> Double {
+        min(max(width, minSidebarWidth), maxSidebarWidth)
+    }
 }
+
+private struct ResizableNoteSidebarDivider: View {
+    let isActive: Bool
+    let onChanged: (CGSize) -> Void
+    let onEnded: () -> Void
+
+    @State private var isHovering = false
+
+    var body: some View {
+        Rectangle()
+            .fill(Color.clear)
+            .frame(width: 9)
+            .overlay {
+                Rectangle()
+                    .fill(Color(nsColor: .separatorColor).opacity(isActive || isHovering ? 0.82 : 0.58))
+                    .frame(width: isActive || isHovering ? 2 : 1)
+            }
+            .contentShape(Rectangle())
+            .resizeLeftRightCursor()
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { value in
+                        onChanged(value.translation)
+                    }
+                    .onEnded { _ in
+                        onEnded()
+                    }
+            )
+            .onHover { hovering in
+                isHovering = hovering
+            }
+            .accessibilityLabel("调整任务列表宽度")
+    }
+}
+
+private struct ResizeLeftRightCursorModifier: ViewModifier {
+    @State private var isHovering = false
+
+    func body(content: Content) -> some View {
+        content
+            .onHover { hovering in
+                guard hovering != isHovering else { return }
+
+                isHovering = hovering
+                if hovering {
+                    NSCursor.resizeLeftRight.push()
+                } else {
+                    NSCursor.pop()
+                }
+            }
+            .onDisappear {
+                if isHovering {
+                    NSCursor.pop()
+                    isHovering = false
+                }
+            }
+    }
+}
+
+private extension View {
+    func resizeLeftRightCursor() -> some View {
+        modifier(ResizeLeftRightCursorModifier())
+    }
+}
+
 
 private struct TaskTitleListItem: View {
     let task: TaskItem

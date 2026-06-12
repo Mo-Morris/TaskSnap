@@ -1047,7 +1047,6 @@ private enum MarkdownAttributedRenderer {
         for block in blocks {
             switch block.kind {
             case let .heading(level, text):
-                appendSpacingIfNeeded(to: result, lines: 1)
                 let start = result.length
                 result.append(inlineAttributedString(
                     text,

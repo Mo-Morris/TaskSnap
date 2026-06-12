@@ -40,7 +40,6 @@ struct TaskBoardView: View {
                 } onHideFloatingWindow: {
                     NSApp.windows.first { $0.title == "TaskSnap" }?.orderOut(nil)
                 } onOpenNote: {
-                    shellState.noteTaskListScope = .all
                     NSApp.activate(ignoringOtherApps: true)
                     openWindow(id: "task-note")
                 } onCreateManualTask: {
@@ -239,7 +238,6 @@ struct TaskBoardView: View {
                                 editingTask = task
                             } onOpenNote: {
                                 shellState.selectedNoteTaskID = task.id
-                                shellState.noteTaskListScope = .selectedOnly
                                 openWindow(id: "task-note")
                             } onDragChanged: { translation, location in
                                 updateDragState(
