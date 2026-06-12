@@ -18,12 +18,13 @@ struct TaskNoteWindowView: View {
     @State private var isTaskSidebarCollapsed = false
     @State private var isOutlineVisible = true
     @State private var sidebarDragStartWidth: Double?
+    @State private var liveSidebarWidth: Double?
     @AppStorage("TaskSnap.noteSidebarWidth") private var sidebarWidth = 292.0
     @AppStorage("TaskSnap.noteWindowZoomScale") private var noteWindowZoomScale = 1.0
     @FocusState private var isEditorFocused: Bool
 
-    private let minSidebarWidth = 220.0
-    private let maxSidebarWidth = 460.0
+    private let minSidebarWidth = 180.0
+    private let maxSidebarWidth = 560.0
     private let minNoteWindowZoomScale = 0.8
     private let maxNoteWindowZoomScale = 1.35
     private let noteWindowZoomStep = 0.1
@@ -47,6 +48,10 @@ struct TaskNoteWindowView: View {
         }
 
         return visibleTasks.first { $0.id == selectedTaskID } ?? visibleTasks.first
+    }
+
+    private var effectiveSidebarWidth: Double {
+        liveSidebarWidth ?? sidebarWidth
     }
 
     private var selectedNote: TaskNote? {
@@ -157,26 +162,57 @@ struct TaskNoteWindowView: View {
     }
 
     private var noteWindowContent: some View {
-        HStack(spacing: 0) {
-            if isTaskSidebarCollapsed {
-                collapsedTaskSidebar
-            } else {
-                taskTitleSidebar
-            }
-
-            ResizableNoteSidebarDivider(isActive: sidebarDragStartWidth != nil) { translation in
-                if sidebarDragStartWidth == nil {
-                    sidebarDragStartWidth = sidebarWidth
+        GeometryReader { proxy in
+            HStack(spacing: 0) {
+                if isTaskSidebarCollapsed {
+                    collapsedTaskSidebar
+                } else {
+                    taskTitleSidebar
                 }
 
-                let startWidth = sidebarDragStartWidth ?? sidebarWidth
-                sidebarWidth = clampedSidebarWidth(startWidth + Double(translation.width) / noteWindowZoomScale)
-            } onEnded: {
+                documentPane
+            }
+            .overlay(alignment: .topLeading) {
+                sidebarResizeHandle
+                    .frame(height: proxy.size.height + proxy.safeAreaInsets.top)
+                    .offset(
+                        x: CGFloat(effectiveSidebarWidthForHandle - 12),
+                        y: -proxy.safeAreaInsets.top
+                    )
+            }
+        }
+    }
+
+    private var effectiveSidebarWidthForHandle: Double {
+        isTaskSidebarCollapsed ? 58 : effectiveSidebarWidth
+    }
+
+    private var sidebarResizeHandle: some View {
+        ResizableNoteSidebarDivider(
+            onDragDelta: { delta in
+                if sidebarDragStartWidth == nil {
+                    sidebarDragStartWidth = effectiveSidebarWidth
+                }
+
+                let startWidth = sidebarDragStartWidth ?? effectiveSidebarWidth
+                var transaction = Transaction()
+                transaction.disablesAnimations = true
+                withTransaction(transaction) {
+                    liveSidebarWidth = clampedSidebarWidth(
+                        startWidth + Double(delta) / noteWindowZoomScale
+                    )
+                }
+            },
+            onDragEnded: {
+                if let liveSidebarWidth {
+                    sidebarWidth = liveSidebarWidth
+                }
+                self.liveSidebarWidth = nil
                 sidebarDragStartWidth = nil
             }
-
-            documentPane
-        }
+        )
+        .frame(width: 12)
+        .frame(maxHeight: .infinity)
     }
 
     private var taskTitleSidebar: some View {
@@ -236,7 +272,7 @@ struct TaskNoteWindowView: View {
             }
         }
         .padding(18)
-        .frame(width: sidebarWidth)
+        .frame(width: effectiveSidebarWidth)
         .frame(maxHeight: .infinity, alignment: .topLeading)
         .background(Color(nsColor: .controlBackgroundColor).opacity(0.46))
     }
@@ -563,69 +599,211 @@ struct TaskNoteWindowView: View {
     }
 }
 
-private struct ResizableNoteSidebarDivider: View {
-    let isActive: Bool
-    let onChanged: (CGSize) -> Void
-    let onEnded: () -> Void
+private struct ResizableNoteSidebarDivider: NSViewRepresentable {
+    let onDragDelta: (CGFloat) -> Void
+    let onDragEnded: () -> Void
 
-    @State private var isHovering = false
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
 
-    var body: some View {
-        Rectangle()
-            .fill(Color.clear)
-            .frame(width: 9)
-            .overlay {
-                Rectangle()
-                    .fill(Color(nsColor: .separatorColor).opacity(isActive || isHovering ? 0.82 : 0.58))
-                    .frame(width: isActive || isHovering ? 2 : 1)
-            }
-            .contentShape(Rectangle())
-            .resizeLeftRightCursor()
-            .gesture(
-                DragGesture(minimumDistance: 0)
-                    .onChanged { value in
-                        onChanged(value.translation)
-                    }
-                    .onEnded { _ in
-                        onEnded()
-                    }
-            )
-            .onHover { hovering in
-                isHovering = hovering
-            }
-            .accessibilityLabel("调整任务列表宽度")
+    func makeNSView(context: Context) -> NoteSidebarDividerView {
+        let view = NoteSidebarDividerView()
+        view.delegate = context.coordinator
+        return view
+    }
+
+    func updateNSView(_ nsView: NoteSidebarDividerView, context: Context) {
+        context.coordinator.onDragDelta = onDragDelta
+        context.coordinator.onDragEnded = onDragEnded
+    }
+
+    final class Coordinator: NSObject, NoteSidebarDividerViewDelegate {
+        var onDragDelta: ((CGFloat) -> Void)?
+        var onDragEnded: (() -> Void)?
+
+        func dividerView(_ view: NoteSidebarDividerView, didDragBy delta: CGFloat) {
+            onDragDelta?(delta)
+        }
+
+        func dividerViewDidEndDrag(_ view: NoteSidebarDividerView) {
+            onDragEnded?()
+        }
     }
 }
 
-private struct ResizeLeftRightCursorModifier: ViewModifier {
-    @State private var isHovering = false
+@MainActor
+private protocol NoteSidebarDividerViewDelegate: AnyObject {
+    func dividerView(_ view: NoteSidebarDividerView, didDragBy delta: CGFloat)
+    func dividerViewDidEndDrag(_ view: NoteSidebarDividerView)
+}
 
-    func body(content: Content) -> some View {
-        content
-            .onHover { hovering in
-                guard hovering != isHovering else { return }
+@MainActor
+private final class NoteSidebarDividerView: NSView {
+    weak var delegate: NoteSidebarDividerViewDelegate?
 
-                isHovering = hovering
-                if hovering {
-                    NSCursor.resizeLeftRight.push()
-                } else {
-                    NSCursor.pop()
-                }
+    private var isHovering = false
+    private var isDragging = false
+    private var dragOriginX: CGFloat = 0
+    nonisolated(unsafe) private var eventMonitor: Any?
+
+    override var isFlipped: Bool { true }
+
+    deinit {
+        if let eventMonitor {
+            NSEvent.removeMonitor(eventMonitor)
+        }
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+
+        if let eventMonitor {
+            NSEvent.removeMonitor(eventMonitor)
+            self.eventMonitor = nil
+        }
+
+        guard window != nil else {
+            clearInteractionState()
+            return
+        }
+
+        eventMonitor = NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved, .leftMouseDragged, .leftMouseUp]) { [weak self] event in
+            MainActor.assumeIsolated {
+                self?.handleMonitoredEvent(event)
             }
-            .onDisappear {
-                if isHovering {
-                    NSCursor.pop()
-                    isHovering = false
-                }
-            }
+            return event
+        }
+    }
+
+    override func resetCursorRects() {
+        super.resetCursorRects()
+        addCursorRect(bounds, cursor: .resizeLeftRight)
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+
+        for area in trackingAreas {
+            removeTrackingArea(area)
+        }
+
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.activeAlways, .inVisibleRect, .mouseEnteredAndExited, .mouseMoved, .cursorUpdate, .enabledDuringMouseDrag],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+    }
+
+    override func cursorUpdate(with event: NSEvent) {
+        updateHoverState(for: event)
+        NSCursor.resizeLeftRight.set()
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        updateHoverState(for: event)
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        updateHoverState(for: event)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        setHovering(false)
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        dragOriginX = event.locationInWindow.x
+        isDragging = true
+        needsDisplay = true
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        updateHoverState(for: event)
+        let delta = event.locationInWindow.x - dragOriginX
+        delegate?.dividerView(self, didDragBy: delta)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        isDragging = false
+        updateHoverState(for: event)
+        needsDisplay = true
+        delegate?.dividerViewDidEndDrag(self)
+    }
+
+    private func handleMonitoredEvent(_ event: NSEvent) {
+        guard event.window === window else {
+            clearInteractionState()
+            return
+        }
+
+        if event.type == .leftMouseUp, isDragging {
+            isDragging = false
+            delegate?.dividerViewDidEndDrag(self)
+        }
+
+        updateHoverState(for: event)
+    }
+
+    private func updateHoverState(for event: NSEvent) {
+        guard event.window === window else {
+            setHovering(false)
+            return
+        }
+
+        let point = convert(event.locationInWindow, from: nil)
+        setHovering(bounds.contains(point))
+    }
+
+    private func setHovering(_ hovering: Bool) {
+        guard isHovering != hovering else { return }
+        isHovering = hovering
+        needsDisplay = true
+    }
+
+    private func clearInteractionState() {
+        let shouldRedraw = isHovering || isDragging
+        isHovering = false
+        isDragging = false
+        if shouldRedraw {
+            needsDisplay = true
+        }
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let backingScale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
+        let hairlineWidth = 1 / backingScale
+        let lineWidth: CGFloat = isDragging ? 3 : (isHovering ? 2.5 : hairlineWidth)
+        let lineColor: NSColor = if isDragging {
+            .controlAccentColor
+        } else if isHovering {
+            .controlAccentColor.withAlphaComponent(0.72)
+        } else {
+            .separatorColor.withAlphaComponent(0.12)
+        }
+
+        lineColor.setFill()
+        let lineX = ((bounds.maxX - lineWidth) * backingScale).rounded(.down) / backingScale
+        let lineRect = NSRect(
+            x: lineX,
+            y: 0,
+            width: lineWidth,
+            height: bounds.height
+        )
+        lineRect.fill()
+    }
+
+    override func accessibilityLabel() -> String? {
+        "调整任务列表宽度"
+    }
+
+    override func accessibilityRole() -> NSAccessibility.Role? {
+        .splitter
     }
 }
 
-private extension View {
-    func resizeLeftRightCursor() -> some View {
-        modifier(ResizeLeftRightCursorModifier())
-    }
-}
 
 
 private struct TaskTitleListItem: View {
