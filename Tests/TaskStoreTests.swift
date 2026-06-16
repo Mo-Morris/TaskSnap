@@ -149,6 +149,30 @@ import Testing
     }
 }
 
+@Test func markdownParserRecognizesTables() {
+    let blocks = MarkdownBlockParser.parse(
+        """
+        | 任务 | 状态 | 负责人 |
+        | :--- | :---: | ---: |
+        | 发布 | 进行中 | 小王 |
+        | 回归 | 完成 | 小李 |
+        """
+    )
+
+    #expect(blocks.count == 1)
+    guard case let .table(table) = blocks[0].kind else {
+        Issue.record("Expected table markdown to be parsed as a table block.")
+        return
+    }
+
+    #expect(table.headers == ["任务", "状态", "负责人"])
+    #expect(table.alignments == [.leading, .center, .trailing])
+    #expect(table.rows == [
+        ["发布", "进行中", "小王"],
+        ["回归", "完成", "小李"]
+    ])
+}
+
 @Test @MainActor func markdownImageResolverResolvesRelativeNotePaths() throws {
     let base = URL(fileURLWithPath: "/tmp/notes", isDirectory: true)
     let markdown = "![截图](./screenshot.png)"

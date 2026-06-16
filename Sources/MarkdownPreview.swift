@@ -1078,6 +1078,9 @@ private enum MarkdownAttributedRenderer {
             case let .blockquote(text):
                 appendBlockquote(text, to: result, quoteRanges: &quoteRanges, baseURL: baseURL)
 
+            case let .table(table):
+                appendTable(table, to: result, baseURL: baseURL)
+
             case .horizontalRule:
                 appendDivider(to: result, dividerRanges: &dividerRanges)
 
@@ -1185,6 +1188,88 @@ private enum MarkdownAttributedRenderer {
         let range = NSRange(location: start, length: max(result.length - start, 1))
         quoteRanges.append(range)
         result.append(NSAttributedString(string: "\n"))
+    }
+
+    private static func appendTable(_ table: MarkdownTable, to result: NSMutableAttributedString, baseURL: URL?) {
+        appendSpacingIfNeeded(to: result, lines: 1)
+        let textTable = NSTextTable()
+        textTable.numberOfColumns = table.headers.count
+        textTable.collapsesBorders = true
+
+        let allRows = [table.headers] + table.rows
+        for (rowIndex, row) in allRows.enumerated() {
+            for columnIndex in 0..<table.headers.count {
+                let cell = row.indices.contains(columnIndex) ? row[columnIndex] : ""
+                appendTableCell(
+                    cell,
+                    rowIndex: rowIndex,
+                    columnIndex: columnIndex,
+                    table: table,
+                    textTable: textTable,
+                    to: result,
+                    baseURL: baseURL
+                )
+            }
+        }
+        result.append(NSAttributedString(string: "\n"))
+    }
+
+    private static func appendTableCell(
+        _ text: String,
+        rowIndex: Int,
+        columnIndex: Int,
+        table: MarkdownTable,
+        textTable: NSTextTable,
+        to result: NSMutableAttributedString,
+        baseURL: URL?
+    ) {
+        let block = NSTextTableBlock(
+            table: textTable,
+            startingRow: rowIndex,
+            rowSpan: 1,
+            startingColumn: columnIndex,
+            columnSpan: 1
+        )
+        block.setBorderColor(MarkdownStyle.tableBorder, for: .minX)
+        block.setBorderColor(MarkdownStyle.tableBorder, for: .maxX)
+        block.setBorderColor(MarkdownStyle.tableBorder, for: .minY)
+        block.setBorderColor(MarkdownStyle.tableBorder, for: .maxY)
+        block.setWidth(1, type: .absoluteValueType, for: .border)
+        block.setWidth(8, type: .absoluteValueType, for: .padding)
+        block.backgroundColor = rowIndex == 0 ? MarkdownStyle.tableHeaderBackground : MarkdownStyle.tableCellBackground
+
+        let style = paragraphStyle(lineSpacing: 3, paragraphSpacing: 0, lineBreakMode: .byWordWrapping)
+        style.alignment = rowIndex == 0 ? .left : nsAlignment(for: table.alignments[columnIndex])
+        style.textBlocks = [block]
+
+        let content = text.isEmpty ? " " : text
+        let cellString = NSMutableAttributedString(attributedString: inlineAttributedString(
+            content,
+            font: rowIndex == 0 ? MarkdownStyle.bodyFont(size: 15, weight: .semibold) : MarkdownStyle.bodyFont(size: 15, weight: .regular),
+            color: rowIndex == 0 ? .labelColor : MarkdownStyle.bodyText,
+            paragraphStyle: style,
+            baseURL: baseURL
+        ))
+        cellString.append(NSAttributedString(
+            string: "\n",
+            attributes: [
+                .font: MarkdownStyle.bodyFont(size: 15, weight: .regular),
+                .foregroundColor: MarkdownStyle.bodyText,
+                .paragraphStyle: style
+            ]
+        ))
+        result.append(cellString)
+    }
+
+    private static func nsAlignment(for alignment: MarkdownTable.Alignment) -> NSTextAlignment {
+        switch alignment {
+        case .leading:
+            return .left
+        case .center:
+            return .center
+        case .trailing:
+            return .right
+        }
     }
 
     private static func appendDivider(to result: NSMutableAttributedString, dividerRanges: inout [NSRange]) {
@@ -1337,6 +1422,10 @@ private enum MarkdownCompactAttributedRenderer {
                 ))
                 result.append(NSAttributedString(string: "\n"))
 
+            case let .table(table):
+                appendSpacingIfNeeded(to: result)
+                appendTable(table, to: result)
+
             case .horizontalRule:
                 appendSpacingIfNeeded(to: result)
                 result.append(NSAttributedString(string: "\n"))
@@ -1388,6 +1477,84 @@ private enum MarkdownCompactAttributedRenderer {
                 paragraphStyle: style
             ))
             result.append(NSAttributedString(string: "\n"))
+        }
+    }
+
+    private static func appendTable(_ table: MarkdownTable, to result: NSMutableAttributedString) {
+        let textTable = NSTextTable()
+        textTable.numberOfColumns = table.headers.count
+        textTable.collapsesBorders = true
+
+        let allRows = [table.headers] + table.rows
+        for (rowIndex, row) in allRows.enumerated() {
+            for columnIndex in 0..<table.headers.count {
+                let cell = row.indices.contains(columnIndex) ? row[columnIndex] : ""
+                appendTableCell(
+                    cell,
+                    rowIndex: rowIndex,
+                    columnIndex: columnIndex,
+                    table: table,
+                    textTable: textTable,
+                    to: result
+                )
+            }
+        }
+        result.append(NSAttributedString(string: "\n"))
+    }
+
+    private static func appendTableCell(
+        _ text: String,
+        rowIndex: Int,
+        columnIndex: Int,
+        table: MarkdownTable,
+        textTable: NSTextTable,
+        to result: NSMutableAttributedString
+    ) {
+        let block = NSTextTableBlock(
+            table: textTable,
+            startingRow: rowIndex,
+            rowSpan: 1,
+            startingColumn: columnIndex,
+            columnSpan: 1
+        )
+        block.setBorderColor(MarkdownStyle.tableBorder, for: .minX)
+        block.setBorderColor(MarkdownStyle.tableBorder, for: .maxX)
+        block.setBorderColor(MarkdownStyle.tableBorder, for: .minY)
+        block.setBorderColor(MarkdownStyle.tableBorder, for: .maxY)
+        block.setWidth(1, type: .absoluteValueType, for: .border)
+        block.setWidth(6, type: .absoluteValueType, for: .padding)
+        block.backgroundColor = rowIndex == 0 ? MarkdownStyle.tableHeaderBackground : MarkdownStyle.tableCellBackground
+
+        let style = paragraphStyle(lineSpacing: 2, paragraphSpacing: 0, lineBreakMode: .byWordWrapping)
+        style.alignment = rowIndex == 0 ? .left : nsAlignment(for: table.alignments[columnIndex])
+        style.textBlocks = [block]
+
+        let content = text.isEmpty ? " " : text
+        let cellString = NSMutableAttributedString(attributedString: inlineAttributedString(
+            content,
+            font: rowIndex == 0 ? MarkdownStyle.bodyFont(size: 12, weight: .semibold) : bodyFont,
+            color: .secondaryLabelColor,
+            paragraphStyle: style
+        ))
+        cellString.append(NSAttributedString(
+            string: "\n",
+            attributes: [
+                .font: bodyFont,
+                .foregroundColor: NSColor.secondaryLabelColor,
+                .paragraphStyle: style
+            ]
+        ))
+        result.append(cellString)
+    }
+
+    private static func nsAlignment(for alignment: MarkdownTable.Alignment) -> NSTextAlignment {
+        switch alignment {
+        case .leading:
+            return .left
+        case .center:
+            return .center
+        case .trailing:
+            return .right
         }
     }
 
@@ -1479,6 +1646,13 @@ private enum MarkdownStyle {
     static let quoteText = dynamic(light: 0x5B6370, dark: 0xB7BECA)
     static let quoteBar = dynamic(light: 0x8AA1BA, dark: 0x5F7FA4)
     static let divider = dynamic(light: 0xD5DAE2, dark: 0x3B4654)
+    static let tableBorder = dynamic(light: 0xD8DEE8, dark: 0x4A5360)
+    static let tableHeaderBackground = NSColor(name: nil) { appearance in
+        appearance.isDark ? NSColor.white.withAlphaComponent(0.09) : NSColor.black.withAlphaComponent(0.045)
+    }
+    static let tableCellBackground = NSColor(name: nil) { appearance in
+        appearance.isDark ? NSColor.white.withAlphaComponent(0.025) : NSColor.white.withAlphaComponent(0.65)
+    }
 
     // Code blocks always render on a dark panel for a consistent, premium look.
     static let codeBackground = NSColor(srgbRed: 0.145, green: 0.157, blue: 0.176, alpha: 1)
@@ -1680,9 +1854,22 @@ struct MarkdownBlock: Identifiable {
         case unorderedList([String])
         case orderedList([String])
         case blockquote(String)
+        case table(MarkdownTable)
         case horizontalRule
         case codeBlock(code: String, language: String?)
     }
+}
+
+struct MarkdownTable: Equatable {
+    enum Alignment: Equatable {
+        case leading
+        case center
+        case trailing
+    }
+
+    let headers: [String]
+    let alignments: [Alignment]
+    let rows: [[String]]
 }
 
 // MARK: - Block parser
@@ -1741,7 +1928,9 @@ enum MarkdownBlockParser {
             codeLanguage = nil
         }
 
-        for line in lines {
+        var index = 0
+        while index < lines.count {
+            let line = lines[index]
             let trimmed = line.trimmingCharacters(in: .whitespaces)
 
             // Inside a fenced code block. Nested fences with an info string open a
@@ -1764,6 +1953,7 @@ enum MarkdownBlockParser {
                 } else {
                     codeLines.append(line)
                 }
+                index += 1
                 continue
             }
 
@@ -1771,23 +1961,34 @@ enum MarkdownBlockParser {
                 flushOpenBlocks()
                 fenceDepth = 1
                 codeLanguage = fence.hasInfo ? fence.info : nil
+                index += 1
                 continue
             }
 
             if trimmed.isEmpty {
                 flushOpenBlocks()
+                index += 1
+                continue
+            }
+
+            if let table = table(from: lines, startingAt: index) {
+                flushOpenBlocks()
+                blocks.append(MarkdownBlock(kind: .table(table.value)))
+                index = table.nextIndex
                 continue
             }
 
             if isHorizontalRule(trimmed) {
                 flushOpenBlocks()
                 blocks.append(MarkdownBlock(kind: .horizontalRule))
+                index += 1
                 continue
             }
 
             if let heading = heading(from: trimmed) {
                 flushOpenBlocks()
                 blocks.append(MarkdownBlock(kind: .heading(level: heading.level, text: heading.text)))
+                index += 1
                 continue
             }
 
@@ -1796,6 +1997,7 @@ enum MarkdownBlockParser {
                 flushUnorderedList()
                 flushOrderedList()
                 quoteLines.append(quoteLine)
+                index += 1
                 continue
             }
 
@@ -1804,6 +2006,7 @@ enum MarkdownBlockParser {
                 flushOrderedList()
                 flushBlockquote()
                 unorderedItems.append(item)
+                index += 1
                 continue
             }
 
@@ -1812,6 +2015,7 @@ enum MarkdownBlockParser {
                 flushUnorderedList()
                 flushBlockquote()
                 orderedItems.append(item)
+                index += 1
                 continue
             }
 
@@ -1819,6 +2023,7 @@ enum MarkdownBlockParser {
             flushOrderedList()
             flushBlockquote()
             paragraphLines.append(line)
+            index += 1
         }
 
         if fenceDepth > 0 {
@@ -1875,6 +2080,81 @@ enum MarkdownBlockParser {
             return false
         }
         return markers.allSatisfy { $0 == marker }
+    }
+
+    private static func table(from lines: [String], startingAt index: Int) -> (value: MarkdownTable, nextIndex: Int)? {
+        guard index + 1 < lines.count else { return nil }
+
+        let headerLine = lines[index].trimmingCharacters(in: .whitespaces)
+        let separatorLine = lines[index + 1].trimmingCharacters(in: .whitespaces)
+        guard headerLine.contains("|"), separatorLine.contains("|") else { return nil }
+
+        let headers = tableCells(from: headerLine)
+        let separators = tableCells(from: separatorLine)
+        guard headers.count >= 2, separators.count == headers.count else { return nil }
+
+        let alignments = separators.compactMap(tableAlignment)
+        guard alignments.count == headers.count else { return nil }
+
+        var rows: [[String]] = []
+        var nextIndex = index + 2
+        while nextIndex < lines.count {
+            let rowLine = lines[nextIndex].trimmingCharacters(in: .whitespaces)
+            guard !rowLine.isEmpty, rowLine.contains("|") else { break }
+
+            let cells = tableCells(from: rowLine)
+            guard cells.count > 1 else { break }
+
+            rows.append(normalizedTableRow(cells, columnCount: headers.count))
+            nextIndex += 1
+        }
+
+        return (
+            MarkdownTable(
+                headers: normalizedTableRow(headers, columnCount: headers.count),
+                alignments: alignments,
+                rows: rows
+            ),
+            nextIndex
+        )
+    }
+
+    private static func tableCells(from line: String) -> [String] {
+        var content = line.trimmingCharacters(in: .whitespaces)
+        if content.hasPrefix("|") {
+            content.removeFirst()
+        }
+        if content.hasSuffix("|") {
+            content.removeLast()
+        }
+
+        return content
+            .split(separator: "|", omittingEmptySubsequences: false)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+    }
+
+    private static func tableAlignment(from cell: String) -> MarkdownTable.Alignment? {
+        let trimmed = cell.trimmingCharacters(in: .whitespaces)
+        guard trimmed.count >= 3 else { return nil }
+
+        let body = trimmed.trimmingCharacters(in: CharacterSet(charactersIn: ":"))
+        guard body.count >= 3, body.allSatisfy({ $0 == "-" }) else { return nil }
+
+        let leadingColon = trimmed.hasPrefix(":")
+        let trailingColon = trimmed.hasSuffix(":")
+        if leadingColon && trailingColon { return .center }
+        if trailingColon { return .trailing }
+        return .leading
+    }
+
+    private static func normalizedTableRow(_ cells: [String], columnCount: Int) -> [String] {
+        if cells.count == columnCount {
+            return cells
+        }
+        if cells.count > columnCount {
+            return Array(cells.prefix(columnCount))
+        }
+        return cells + Array(repeating: "", count: columnCount - cells.count)
     }
 
     private static func unorderedListItem(from line: String) -> String? {
