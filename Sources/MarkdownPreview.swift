@@ -1765,6 +1765,7 @@ private enum CodeHighlighter {
         case code
         case shell
         case json
+        case yaml
         case plain
     }
 
@@ -1794,6 +1795,8 @@ private enum CodeHighlighter {
             highlightShell(result, range: full)
         case .json:
             highlightJSON(result, range: full)
+        case .yaml:
+            highlightYAML(result, range: full)
         }
 
         return result
@@ -1807,6 +1810,8 @@ private enum CodeHighlighter {
             return .shell
         case "json", "jsonc", "json5":
             return .json
+        case "yaml", "yml":
+            return .yaml
         default:
             return .code
         }
@@ -1874,6 +1879,12 @@ private enum CodeHighlighter {
         apply("\"(?:[^\"\\\\]|\\\\.)*\"", color: Palette.string, to: s, range: range)
         apply("\"(?:[^\"\\\\]|\\\\.)*\"(?=\\s*:)", color: Palette.property, to: s, range: range)
         apply("//[^\\n]*", color: Palette.comment, to: s, range: range)
+    }
+
+    private static func highlightYAML(_ s: NSMutableAttributedString, range: NSRange) {
+        apply("(?m)^\\s*(?:-\\s*)?[A-Za-z_][\\w.-]*\\s*:\\s*(.+)$", group: 1, color: Palette.command, to: s, range: range)
+        apply("(?m)^\\s*(?:-\\s*)?([A-Za-z_][\\w.-]*)(?=\\s*:)", group: 1, color: Palette.property, to: s, range: range)
+        apply("(?m)(?:^|\\s)(#.*)$", group: 1, color: Palette.comment, to: s, range: range)
     }
 }
 

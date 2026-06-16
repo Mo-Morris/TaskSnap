@@ -825,29 +825,35 @@ private struct TaskTitleListItem: View {
 
     private var itemBackground: Color {
         if isSelected {
-            return Color(hex: task.backgroundColorHex).opacity(isDark ? 0.24 : 0.36)
+            return Color.accentColor.opacity(isDark ? 0.16 : 0.10)
         }
-        return isDark ? Color.white.opacity(0.06) : Color.white.opacity(0.62)
+        return Color.clear
     }
 
     private var itemStroke: Color {
         if isSelected {
-            return Color.accentColor.opacity(isDark ? 0.45 : 0.32)
+            return Color.accentColor.opacity(isDark ? 0.24 : 0.18)
         }
-        return isDark ? Color.white.opacity(0.10) : Color.black.opacity(0.08)
+        return Color.clear
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 6) {
             Button(action: onSelectTask) {
-                Text(TaskDisplayText(task: task).title)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 14)
-                .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
+                HStack(spacing: 8) {
+                    Circle()
+                        .fill(Color(hex: task.backgroundColorHex))
+                        .frame(width: 6, height: 6)
+
+                    Text(TaskDisplayText(task: task).title)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 9)
+                .frame(maxWidth: .infinity, minHeight: 36, alignment: .leading)
                 .background(
                     RoundedRectangle(cornerRadius: 8, style: .continuous)
                         .fill(itemBackground)
@@ -878,12 +884,13 @@ private struct TaskTitleListItem: View {
             }
 
             if isSelected {
-                VStack(alignment: .leading, spacing: 5) {
-                    ForEach(task.notes) { note in
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(Array(task.notes.enumerated()), id: \.element.id) { index, note in
                         NoteListItem(
                             note: note,
                             isSelected: note.id == selectedNoteID,
-                            exists: noteExists(note)
+                            exists: noteExists(note),
+                            isLast: index == task.notes.count - 1
                         ) {
                             onSelectNote(note)
                         } onDelete: {
@@ -891,7 +898,7 @@ private struct TaskTitleListItem: View {
                         }
                     }
                 }
-                .padding(.leading, 8)
+                .padding(.leading, 16)
                 .contextMenu {
                     Button(action: onCreateNote) {
                         Label("新建笔记", systemImage: "square.and.pencil")
@@ -911,12 +918,18 @@ private struct NoteListItem: View {
     let note: TaskNote
     let isSelected: Bool
     let exists: Bool
+    let isLast: Bool
     let action: () -> Void
     let onDelete: () -> Void
 
+    @Environment(\.colorScheme) private var colorScheme
+
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 7) {
+            HStack(spacing: 0) {
+                NoteTreeConnector(isLast: isLast)
+                    .frame(width: 30, height: 32)
+
                 Image(systemName: note.kind == .local ? "doc.text" : "link")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundColor(exists ? .secondary : .red)
@@ -926,14 +939,14 @@ private struct NoteListItem: View {
                     .font(.system(size: 12, weight: isSelected ? .semibold : .regular))
                     .foregroundColor(exists ? .primary : .red)
                     .lineLimit(1)
+                    .padding(.leading, 7)
 
                 Spacer(minLength: 0)
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 7)
+            .padding(.trailing, 8)
             .background(
                 RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .fill(isSelected ? Color.accentColor.opacity(0.1) : Color.clear)
+                    .fill(isSelected ? Color.accentColor.opacity(colorScheme == .dark ? 0.14 : 0.09) : Color.clear)
             )
         }
         .buttonStyle(.plain)
@@ -952,6 +965,30 @@ private struct NoteListItem: View {
             "删除笔记"
         case .external:
             "解除关联"
+        }
+    }
+}
+
+private struct NoteTreeConnector: View {
+    let isLast: Bool
+
+    @Environment(\.colorScheme) private var colorScheme
+
+    private var lineColor: Color {
+        colorScheme == .dark ? Color.white.opacity(0.22) : Color.black.opacity(0.18)
+    }
+
+    var body: some View {
+        GeometryReader { proxy in
+            Path { path in
+                let x: CGFloat = 12
+                let midY = proxy.size.height / 2
+                path.move(to: CGPoint(x: x, y: 0))
+                path.addLine(to: CGPoint(x: x, y: isLast ? midY : proxy.size.height))
+                path.move(to: CGPoint(x: x, y: midY))
+                path.addLine(to: CGPoint(x: proxy.size.width - 6, y: midY))
+            }
+            .stroke(lineColor, style: StrokeStyle(lineWidth: 1, lineCap: .round, lineJoin: .round))
         }
     }
 }
