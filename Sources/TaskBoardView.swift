@@ -1196,26 +1196,26 @@ private struct TaskRowIconButton: View {
 }
 
 struct PointingHandCursorModifier: ViewModifier {
-    @State private var isHovering = false
-
     func body(content: Content) -> some View {
         content
-            .onHover { hovering in
-                guard hovering != isHovering else { return }
+            .background(PointingHandCursorView())
+    }
+}
 
-                isHovering = hovering
-                if hovering {
-                    NSCursor.pointingHand.push()
-                } else {
-                    NSCursor.pop()
-                }
-            }
-            .onDisappear {
-                if isHovering {
-                    NSCursor.pop()
-                    isHovering = false
-                }
-            }
+private struct PointingHandCursorView: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView {
+        PointingHandCursorNSView()
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        nsView.discardCursorRects()
+    }
+}
+
+private final class PointingHandCursorNSView: NSView {
+    override func resetCursorRects() {
+        super.resetCursorRects()
+        addCursorRect(bounds, cursor: .pointingHand)
     }
 }
 

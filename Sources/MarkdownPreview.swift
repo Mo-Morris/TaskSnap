@@ -155,15 +155,15 @@ struct MarkdownPreviewView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
 
                 if isOutlineVisible, !currentOutlineItems.isEmpty {
-                    MarkdownOutlineView(items: currentOutlineItems) { item in
+                    MarkdownOutlineView(items: currentOutlineItems, maxHeight: proxy.size.height) { item in
                         selectedOutlineItemID = item.id
                     }
-                    .frame(width: 184)
+                    .frame(width: 228)
                 }
             }
             .frame(width: proxy.size.width, height: proxy.size.height, alignment: .topLeading)
         }
-        .frame(maxWidth: isOutlineVisible ? 1080 : 860, maxHeight: .infinity, alignment: .topLeading)
+        .frame(maxWidth: isOutlineVisible ? 1140 : 860, maxHeight: .infinity, alignment: .topLeading)
         .padding(.horizontal, 52)
         .padding(.vertical, 30)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -407,35 +407,61 @@ private struct MarkdownOutlineItem: Identifiable {
 
 private struct MarkdownOutlineView: View {
     let items: [MarkdownOutlineItem]
+    let maxHeight: CGFloat
     let onSelect: (MarkdownOutlineItem) -> Void
 
     @Environment(\.colorScheme) private var colorScheme
+    @State private var hoveredItemID: Int?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 9) {
+        VStack(alignment: .leading, spacing: 6) {
             Text("大纲")
                 .font(.custom("PingFang SC", size: 13).weight(.semibold))
                 .foregroundStyle(.secondary)
 
-            ForEach(items) { item in
-                Button {
-                    onSelect(item)
-                } label: {
-                    Text(item.title)
-                        .font(.custom("PingFang SC", size: outlineFontSize(for: item.level))
-                            .weight(item.level <= 2 ? .semibold : .regular))
-                        .foregroundStyle(.primary)
-                        .lineLimit(2)
-                        .multilineTextAlignment(.leading)
+            ScrollView(.vertical) {
+                VStack(alignment: .leading, spacing: 3) {
+                    ForEach(items) { item in
+                        Button {
+                            onSelect(item)
+                        } label: {
+                            Text(item.title)
+                                .font(.custom("PingFang SC", size: outlineFontSize(for: item.level))
+                                    .weight(item.level <= 2 ? .semibold : .regular))
+                                .foregroundStyle(outlineRowForeground(for: item))
+                                .underline(hoveredItemID == item.id, color: outlineLinkColor)
+                                .lineLimit(2)
+                                .multilineTextAlignment(.leading)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.vertical, 2)
+                                .padding(.leading, CGFloat(max(item.level - 1, 0)) * 12 + 8)
+                                .padding(.trailing, 8)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.leading, CGFloat(max(item.level - 1, 0)) * 8)
+                        .contentShape(Rectangle())
+                        .onHover { isHovering in
+                            hoveredItemID = isHovering ? item.id : nil
+                            if isHovering {
+                                NSCursor.pointingHand.set()
+                            }
+                        }
+                        .onContinuousHover { phase in
+                            if case .active = phase {
+                                NSCursor.pointingHand.set()
+                            }
+                        }
+                        .pointingHandCursor()
+                    }
                 }
-                .buttonStyle(.plain)
-                .pointingHandCursor()
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
+            .scrollIndicators(.visible)
         }
         .padding(.vertical, 12)
         .padding(.horizontal, 12)
+        .frame(maxHeight: max(120, maxHeight))
         .background(Color(nsColor: .controlBackgroundColor).opacity(0.55))
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         .overlay {
@@ -447,6 +473,15 @@ private struct MarkdownOutlineView: View {
     private func outlineFontSize(for level: Int) -> CGFloat {
         level <= 2 ? 13 : 12
     }
+
+    private var outlineLinkColor: Color {
+        Color(nsColor: .linkColor)
+    }
+
+    private func outlineRowForeground(for item: MarkdownOutlineItem) -> Color {
+        hoveredItemID == item.id ? outlineLinkColor : .primary
+    }
+
 }
 
 // MARK: - Selectable text view (TextKit)
