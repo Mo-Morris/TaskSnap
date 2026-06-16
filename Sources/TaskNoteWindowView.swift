@@ -841,10 +841,6 @@ private struct TaskTitleListItem: View {
         VStack(alignment: .leading, spacing: 6) {
             Button(action: onSelectTask) {
                 HStack(spacing: 8) {
-                    Circle()
-                        .fill(Color(hex: task.backgroundColorHex))
-                        .frame(width: 6, height: 6)
-
                     Text(TaskDisplayText(task: task).title)
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(.primary)
