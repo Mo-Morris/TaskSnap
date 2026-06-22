@@ -8,7 +8,6 @@ struct TaskBoardView: View {
     @EnvironmentObject private var shellState: AppShellState
     @Environment(\.openSettings) private var openSettings
     @Environment(\.openWindow) private var openWindow
-    @Environment(\.colorScheme) private var colorScheme
     @State private var isDropTargeted = false
     @State private var previewTask: TaskItem?
     @State private var editingTask: TaskItem?
@@ -60,7 +59,7 @@ struct TaskBoardView: View {
         }
         .overlay {
             if !shellState.isMainWindowCollapsed || isDropTargeted {
-                RoundedRectangle(cornerRadius: shellState.isMainWindowCollapsed ? 36 : 14)
+                RoundedRectangle(cornerRadius: shellState.isMainWindowCollapsed ? 36 : 16, style: .continuous)
                     .stroke(
                         isDropTargeted ? Color.accentColor : Color.white.opacity(0.18),
                         lineWidth: isDropTargeted ? 2 : 1
@@ -68,7 +67,7 @@ struct TaskBoardView: View {
                     .allowsHitTesting(false)
             }
         }
-        .clipShape(RoundedRectangle(cornerRadius: shellState.isMainWindowCollapsed ? 36 : 14, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: shellState.isMainWindowCollapsed ? 36 : 16, style: .continuous))
         .onDrop(
             of: [UTType.image.identifier, UTType.fileURL.identifier, UTType.png.identifier, UTType.jpeg.identifier],
             isTargeted: $isDropTargeted,
@@ -147,7 +146,11 @@ struct TaskBoardView: View {
                 taskList
             }
         }
-        .background(Color(nsColor: .windowBackgroundColor))
+        // Solid floating surface prevents the titlebar/safe-area band from showing desktop content through.
+        .background {
+            FloatingTaskPalette.windowBackground
+                .ignoresSafeArea()
+        }
     }
 
     private var titleBar: some View {
@@ -159,13 +162,13 @@ struct TaskBoardView: View {
             } label: {
                 Image(systemName: "plus")
                     .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(Color.primary.opacity(0.78))
-                    .frame(width: 20, height: 20)
-                    .background(colorScheme == .dark ? Color.white.opacity(0.12) : Color.white.opacity(0.76))
+                    .foregroundStyle(FloatingTaskPalette.primaryText.opacity(0.84))
+                    .frame(width: 22, height: 22)
+                    .background(FloatingTaskPalette.controlFill)
                     .clipShape(Circle())
                     .overlay {
                         Circle()
-                            .stroke(colorScheme == .dark ? Color.white.opacity(0.16) : Color.black.opacity(0.08), lineWidth: 1)
+                            .stroke(FloatingTaskPalette.separator, lineWidth: 0.5)
                     }
             }
             .buttonStyle(.plain)
@@ -173,14 +176,22 @@ struct TaskBoardView: View {
             .help("新建手动任务")
             .accessibilityLabel("新建手动任务")
         }
-        .frame(height: 30)
-        .padding(.horizontal, 28)
-        .background(Color(nsColor: .windowBackgroundColor))
+        .frame(height: 34)
+        .padding(.horizontal, 30)
+        // Fixed header material: dark translucent fill + blur keeps scrolled content from bleeding into controls.
+        .background {
+            ZStack {
+                FloatingHeaderVibrancy()
+                FloatingTaskPalette.headerTint
+            }
+            .ignoresSafeArea(edges: .top)
+        }
         .overlay(alignment: .bottom) {
             Rectangle()
-                .fill(Color(nsColor: .separatorColor))
-                .frame(height: 1)
+                .fill(FloatingTaskPalette.headerSeparator)
+                .frame(height: 0.5)
         }
+        .zIndex(100)
     }
 
     private var emptyState: some View {
@@ -211,7 +222,7 @@ struct TaskBoardView: View {
         GeometryReader { containerProxy in
             ZStack(alignment: .topLeading) {
                 ScrollView {
-                    VStack(spacing: 14) {
+                    VStack(spacing: 12) {
                         ForEach(Array(visibleTasks.enumerated()), id: \.element.id) { index, task in
                             TaskRow(
                                 task: task,
@@ -273,9 +284,9 @@ struct TaskBoardView: View {
                             }
                         }
                     }
-                    .padding(.horizontal, 28)
-                    .padding(.top, 10)
-                    .padding(.bottom, 18)
+                    .padding(.horizontal, 36)
+                    .padding(.top, 16)
+                    .padding(.bottom, 24)
                     .frame(maxWidth: .infinity)
                     .overlay(alignment: .topLeading) {
                         insertionIndicatorOverlay
@@ -903,40 +914,13 @@ private struct TaskRow: View {
     let onDragEnded: () -> Void
 
     @State private var isHovering = false
-    @Environment(\.colorScheme) private var colorScheme
-
-    private var isDark: Bool {
-        colorScheme == .dark
-    }
 
     private var cardColor: Color {
         Color(hex: task.backgroundColorHex)
     }
 
-    private var cardBaseSurface: Color {
-        guard isDark else { return .clear }
-        return Color.white.opacity(isCompleted ? 0.04 : 0.07)
-    }
-
-    private var cardTintOpacity: Double {
-        if isDark {
-            return isCompleted ? 0.12 : 0.20
-        }
-        return isCompleted ? 0.18 : 0.34
-    }
-
-    private var cardStrokeColor: Color {
-        if isDark {
-            return cardColor.opacity(isCompleted ? 0.30 : 0.50)
-        }
-        return cardColor.opacity(0.72)
-    }
-
     private var cardShadowColor: Color {
-        if isDark {
-            return Color.black.opacity(isPickedUp ? 0.45 : 0.30)
-        }
-        return Color.black.opacity(isPickedUp ? 0.22 : (isCompleted ? 0.025 : 0.07))
+        Color.black.opacity(isPickedUp ? 0.38 : 0.18)
     }
 
     private var displayTitle: String {
@@ -960,13 +944,13 @@ private struct TaskRow: View {
             .scaleEffect(isPickedUp ? 1.04 : 1)
             .shadow(
                 color: cardShadowColor,
-                radius: isPickedUp ? 18 : 8,
-                y: isPickedUp ? 10 : 3
+                radius: isPickedUp ? 26 : 22,
+                y: isPickedUp ? 14 : 10
             )
             .opacity(isPickedUp ? 0.96 : 1)
             .animation(.spring(response: 0.24, dampingFraction: 0.78), value: isPickedUp)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
             .gesture(rowDragGesture)
             .onHover { hovering in
                 guard !isPickedUp else { return }
@@ -998,44 +982,50 @@ private struct TaskRow: View {
     }
 
     private var cardContent: some View {
-        HStack(alignment: .center, spacing: 12) {
-            VStack(alignment: .leading, spacing: 7) {
+        HStack(alignment: .center, spacing: 14) {
+            RoundedRectangle(cornerRadius: 2, style: .continuous)
+                .fill(cardColor.opacity(isCompleted ? 0.24 : 0.46))
+                .frame(width: 3)
+
+            VStack(alignment: .leading, spacing: 8) {
                 Text(displayTitle)
-                    .font(.headline.weight(.semibold))
-                    .foregroundStyle(isCompleted ? .secondary : .primary)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(isCompleted ? FloatingTaskPalette.secondaryText : FloatingTaskPalette.primaryText)
                     .strikethrough(isCompleted)
                     .lineLimit(2)
                     .minimumScaleFactor(0.72)
                     .multilineTextAlignment(.leading)
 
                 MarkdownDescriptionPreviewView(markdown: displayDescription, isCompleted: isCompleted)
-
-                SourceBadge(source: task.inputSource, isCompleted: isCompleted)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
 
             DragGrip()
+                // Hover-only controls keep the list visually quiet until the pointer asks for affordances.
                 .opacity(isPickedUp || isHovering ? 0.62 : 0)
         }
         .padding(.leading, 18)
-        .padding(.trailing, 18)
-        .padding(.vertical, 12)
-        .frame(minHeight: 70)
+        .padding(.trailing, 16)
+        .padding(.vertical, 16)
+        .padding(.top, 2)
+        .frame(minHeight: 86)
         .background {
-            RoundedRectangle(cornerRadius: 13, style: .continuous)
-                .fill(cardBaseSurface)
-                .overlay {
-                    RoundedRectangle(cornerRadius: 13, style: .continuous)
-                        .fill(cardColor.opacity(cardTintOpacity))
-                }
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                // Lifted glass card: visible enough to organize information without becoming heavy.
+                .fill(isHovering || isPickedUp ? FloatingTaskPalette.rowHoverFill : FloatingTaskPalette.rowFill)
         }
         .overlay {
-            RoundedRectangle(cornerRadius: 13, style: .continuous)
-                .stroke(cardStrokeColor, lineWidth: 1.2)
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(FloatingTaskPalette.cardStroke, lineWidth: 0.5)
                 .allowsHitTesting(false)
         }
-        .opacity(isCompleted ? (isDark ? 0.78 : 0.68) : 1)
+        .overlay(alignment: .topTrailing) {
+            SourceBadge(source: task.inputSource, isCompleted: isCompleted)
+                .padding(.top, 9)
+                .padding(.trailing, 12)
+        }
+        .opacity(isCompleted ? 0.70 : 1)
     }
 
     private var rowDragGesture: some Gesture {
@@ -1058,9 +1048,17 @@ private struct SourceBadge: View {
 
     var body: some View {
         Text(source.label)
-            .font(.system(size: 11, weight: .medium))
-            .foregroundStyle(.tertiary)
+            .font(.system(size: 9.5, weight: .medium))
+            .foregroundStyle(FloatingTaskPalette.tertiaryText)
             .strikethrough(isCompleted)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2.5)
+            .background(FloatingTaskPalette.badgeFill)
+            .clipShape(Capsule())
+            .overlay {
+                Capsule()
+                    .stroke(FloatingTaskPalette.separator.opacity(0.72), lineWidth: 0.5)
+            }
     }
 }
 
@@ -1172,6 +1170,55 @@ private struct ReorderInsertionIndicator: View {
         .frame(height: 8)
         .transition(.opacity.combined(with: .scale(scale: 0.96)))
     }
+}
+
+private struct FloatingWindowVibrancy: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let view = NSVisualEffectView()
+        view.blendingMode = .behindWindow
+        view.material = .hudWindow
+        view.state = .active
+        view.wantsLayer = true
+        return view
+    }
+
+    func updateNSView(_ view: NSVisualEffectView, context: Context) {
+        view.blendingMode = .behindWindow
+        view.material = .hudWindow
+        view.state = .active
+    }
+}
+
+private struct FloatingHeaderVibrancy: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let view = NSVisualEffectView()
+        view.blendingMode = .withinWindow
+        view.material = .headerView
+        view.state = .active
+        return view
+    }
+
+    func updateNSView(_ view: NSVisualEffectView, context: Context) {
+        view.blendingMode = .withinWindow
+        view.material = .headerView
+        view.state = .active
+    }
+}
+
+private enum FloatingTaskPalette {
+    static let windowBackground = Color(red: 41 / 255, green: 41 / 255, blue: 41 / 255)
+    static let windowTint = Color.black.opacity(0.18)
+    static let headerTint = Color(red: 45 / 255, green: 45 / 255, blue: 45 / 255).opacity(0.80)
+    static let rowFill = Color.white.opacity(0.048)
+    static let rowHoverFill = Color.white.opacity(0.075)
+    static let controlFill = Color.white.opacity(0.115)
+    static let badgeFill = Color.white.opacity(0.035)
+    static let separator = Color.white.opacity(0.12)
+    static let headerSeparator = Color.white.opacity(0.10)
+    static let cardStroke = Color.white.opacity(0.09)
+    static let primaryText = Color.white
+    static let secondaryText = Color.white.opacity(0.55)
+    static let tertiaryText = Color.white.opacity(0.34)
 }
 
 private struct TaskRowIconButton: View {

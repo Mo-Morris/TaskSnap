@@ -53,7 +53,7 @@ struct TaskSnapApp: App {
                 WindowConfigurator(isCollapsed: $shellState.isMainWindowCollapsed)
                     .allowsHitTesting(false)
             }
-            .preferredColorScheme(selectedTheme.colorScheme)
+            .preferredColorScheme(.dark)
             .environmentObject(shellState)
             .onAppear {
                 appDelegate.pasteCommandDispatcher = pasteCommandDispatcher

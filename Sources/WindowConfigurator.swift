@@ -5,6 +5,7 @@ struct WindowConfigurator: NSViewRepresentable {
     @Binding var isCollapsed: Bool
     private let collapsedSize = CGSize(width: 72, height: 72)
     private let defaultExpandedSize = CGSize(width: 912, height: 980)
+    private let expandedTopMargin: CGFloat = 18
 
     func makeNSView(context: Context) -> NSView {
         let view = PassthroughView()
@@ -44,10 +45,13 @@ struct WindowConfigurator: NSViewRepresentable {
         window.level = .floating
         window.isMovableByWindowBackground = isCollapsed
         window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        window.styleMask.insert(.fullSizeContentView)
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
         window.isOpaque = !isCollapsed
-        window.backgroundColor = isCollapsed ? .clear : .windowBackgroundColor
+        window.backgroundColor = isCollapsed
+            ? .clear
+            : NSColor(srgbRed: 0.16, green: 0.16, blue: 0.16, alpha: 1)
         window.hasShadow = !isCollapsed
 
         window.standardWindowButton(.zoomButton)?.isHidden = true
@@ -107,7 +111,7 @@ struct WindowConfigurator: NSViewRepresentable {
             {
                 expandedFrame = clamped(lastExpandedFrame, in: visibleFrame(for: lastExpandedFrame, window: window))
             } else {
-                expandedFrame = nearestFrame(
+                expandedFrame = raisedExpandedFrame(
                     to: collapsedFrame,
                     targetSize: expandedSize,
                     in: window
@@ -121,6 +125,19 @@ struct WindowConfigurator: NSViewRepresentable {
                 window.setFrame(expandedFrame, display: true, animate: true)
             }
         }
+    }
+
+    private func raisedExpandedFrame(to anchor: NSRect, targetSize: CGSize, in window: NSWindow) -> NSRect {
+        let visibleFrame = visibleFrame(for: anchor, window: window)
+        let width = min(targetSize.width, visibleFrame.width)
+        let height = min(targetSize.height, visibleFrame.height)
+        let centeredX = anchor.midX - width / 2
+        let raisedY = visibleFrame.maxY - height - expandedTopMargin
+
+        return clamped(
+            NSRect(x: centeredX, y: raisedY, width: width, height: height),
+            in: visibleFrame
+        )
     }
 
     private func nearestFrame(to anchor: NSRect, targetSize: CGSize, in window: NSWindow) -> NSRect {

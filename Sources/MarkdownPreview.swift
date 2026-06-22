@@ -207,8 +207,9 @@ private struct CompactMarkdownTextView: NSViewRepresentable {
         textView.textContainer?.heightTracksTextView = false
         textView.isVerticallyResizable = true
         textView.isHorizontallyResizable = false
+        // Softer task-list link color avoids the harsh saturated system blue in the dark floating window.
         textView.linkTextAttributes = [
-            .foregroundColor: NSColor.linkColor,
+            .foregroundColor: MarkdownStyle.softLink,
             .underlineStyle: NSUnderlineStyle.single.rawValue
         ]
         applyContent(to: textView)
@@ -370,7 +371,7 @@ private final class CompactLinkTextView: NSTextView {
 
         clearHoveredLink()
         guard let range else { return }
-        layoutManager?.addTemporaryAttributes(MarkdownStyle.linkHoverAttributes, forCharacterRange: range)
+        layoutManager?.addTemporaryAttributes(MarkdownStyle.compactLinkHoverAttributes, forCharacterRange: range)
         hoveredLinkRange = range
         needsDisplay = true
     }
@@ -1427,7 +1428,7 @@ private enum MarkdownCompactAttributedRenderer {
                 result.append(inlineAttributedString(
                     text,
                     font: headingFont(for: level),
-                    color: .secondaryLabelColor,
+                    color: MarkdownStyle.compactDescriptionText,
                     paragraphStyle: paragraphStyle(lineSpacing: 3, paragraphSpacing: 5)
                 ))
                 result.append(NSAttributedString(string: "\n"))
@@ -1436,7 +1437,7 @@ private enum MarkdownCompactAttributedRenderer {
                 result.append(inlineAttributedString(
                     text,
                     font: bodyFont,
-                    color: .secondaryLabelColor,
+                    color: MarkdownStyle.compactDescriptionText,
                     paragraphStyle: paragraphStyle(lineSpacing: 4, paragraphSpacing: 5)
                 ))
                 result.append(NSAttributedString(string: "\n"))
@@ -1452,7 +1453,7 @@ private enum MarkdownCompactAttributedRenderer {
                 result.append(inlineAttributedString(
                     text,
                     font: bodyFont,
-                    color: .tertiaryLabelColor,
+                    color: MarkdownStyle.compactTertiaryText,
                     paragraphStyle: paragraphStyle(lineSpacing: 4, paragraphSpacing: 5, headIndent: 12)
                 ))
                 result.append(NSAttributedString(string: "\n"))
@@ -1471,7 +1472,7 @@ private enum MarkdownCompactAttributedRenderer {
                     string: code.isEmpty ? " " : code,
                     attributes: [
                         .font: NSFont.monospacedSystemFont(ofSize: 12, weight: .regular),
-                        .foregroundColor: NSColor.secondaryLabelColor,
+                        .foregroundColor: MarkdownStyle.compactDescriptionText,
                         .backgroundColor: MarkdownStyle.inlineCodeBackground,
                         .paragraphStyle: paragraphStyle(lineSpacing: 3, paragraphSpacing: 5, lineBreakMode: .byCharWrapping)
                     ]
@@ -1483,6 +1484,8 @@ private enum MarkdownCompactAttributedRenderer {
         while result.string.hasSuffix("\n") {
             result.deleteCharacters(in: NSRange(location: result.length - 1, length: 1))
         }
+
+        collapseVisibleURLs(in: result)
 
         if isCompleted, result.length > 0 {
             result.addAttribute(.strikethroughStyle, value: NSUnderlineStyle.single.rawValue, range: NSRange(location: 0, length: result.length))
@@ -1501,14 +1504,14 @@ private enum MarkdownCompactAttributedRenderer {
                 string: marker,
                 attributes: [
                     .font: MarkdownStyle.bodyFont(size: 14, weight: .semibold),
-                    .foregroundColor: NSColor.tertiaryLabelColor,
+                    .foregroundColor: MarkdownStyle.compactTertiaryText,
                     .paragraphStyle: style
                 ]
             ))
             result.append(inlineAttributedString(
                 item,
                 font: bodyFont,
-                color: .secondaryLabelColor,
+                color: MarkdownStyle.compactDescriptionText,
                 paragraphStyle: style
             ))
             result.append(NSAttributedString(string: "\n"))
@@ -1568,18 +1571,54 @@ private enum MarkdownCompactAttributedRenderer {
         let cellString = NSMutableAttributedString(attributedString: inlineAttributedString(
             content,
             font: rowIndex == 0 ? MarkdownStyle.bodyFont(size: 12, weight: .semibold) : bodyFont,
-            color: .secondaryLabelColor,
+            color: MarkdownStyle.compactDescriptionText,
             paragraphStyle: style
         ))
         cellString.append(NSAttributedString(
             string: "\n",
             attributes: [
                 .font: bodyFont,
-                .foregroundColor: NSColor.secondaryLabelColor,
+                .foregroundColor: MarkdownStyle.compactDescriptionText,
                 .paragraphStyle: style
             ]
         ))
         result.append(cellString)
+    }
+
+    private static func collapseVisibleURLs(in result: NSMutableAttributedString) {
+        guard
+            result.length > 0,
+            let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
+        else {
+            return
+        }
+
+        let fullRange = NSRange(location: 0, length: result.length)
+        let matches = detector.matches(in: result.string, options: [], range: fullRange)
+
+        for match in matches.reversed() {
+            guard
+                let url = match.url,
+                match.range.location != NSNotFound,
+                NSMaxRange(match.range) <= result.length
+            else {
+                continue
+            }
+
+            let visibleText = (result.string as NSString).substring(with: match.range)
+            guard visibleText.count > 18 || visibleText.contains("?") else { continue }
+
+            let replacement = NSAttributedString(
+                string: "链接 ↗",
+                attributes: [
+                    .font: MarkdownStyle.bodyFont(size: 13, weight: .medium),
+                    .foregroundColor: MarkdownStyle.softLink,
+                    .link: url,
+                    .underlineStyle: NSUnderlineStyle.single.rawValue
+                ]
+            )
+            result.replaceCharacters(in: match.range, with: replacement)
+        }
     }
 
     private static func nsAlignment(for alignment: MarkdownTable.Alignment) -> NSTextAlignment {
@@ -1697,6 +1736,17 @@ private enum MarkdownStyle {
     static let inlineCodeText = dynamic(light: 0xB5446E, dark: 0xF2A6C2)
     static let inlineCodeBackground = NSColor(name: nil) { appearance in
         appearance.isDark ? NSColor.white.withAlphaComponent(0.10) : NSColor.black.withAlphaComponent(0.06)
+    }
+    static let compactDescriptionText = NSColor.white.withAlphaComponent(0.55)
+    static let compactTertiaryText = NSColor.white.withAlphaComponent(0.36)
+    static let softLink = NSColor(srgbRed: 0.37, green: 0.62, blue: 1.0, alpha: 1)
+    static let compactLinkHoverBackground = softLink.withAlphaComponent(0.24)
+    static var compactLinkHoverAttributes: [NSAttributedString.Key: Any] {
+        [
+            .foregroundColor: softLink,
+            .backgroundColor: compactLinkHoverBackground,
+            .underlineStyle: NSUnderlineStyle.single.rawValue
+        ]
     }
     static let linkHoverBackground = NSColor(name: nil) { appearance in
         appearance.isDark ? NSColor.linkColor.withAlphaComponent(0.24) : NSColor.linkColor.withAlphaComponent(0.14)
