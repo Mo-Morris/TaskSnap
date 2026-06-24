@@ -1113,49 +1113,22 @@ private struct NoteTaskEditFormView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 22) {
-            HStack {
-                Text("编辑任务")
-                    .font(.system(size: 24, weight: .bold))
-
-                Spacer()
-
-                Button {
-                    dismiss()
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.title2)
-                        .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
-                .help("关闭")
+            TaskFormHeader(title: "编辑任务") {
+                dismiss()
             }
 
             VStack(alignment: .leading, spacing: 8) {
-                Text("任务名称")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.secondary)
+                TaskFormLabel(title: "任务名称")
 
                 TextField("例如：明天确认上线计划", text: $title)
-                    .textFieldStyle(.roundedBorder)
                     .focused($isTitleFocused)
+                    .taskFormTextField(isFocused: isTitleFocused)
             }
 
             VStack(alignment: .leading, spacing: 8) {
-                Text("任务描述")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.secondary)
+                TaskFormLabel(title: "任务描述")
 
-                TextEditor(text: $description)
-                    .font(.system(size: 14))
-                    .scrollContentBackground(.hidden)
-                    .padding(8)
-                    .frame(height: 118)
-                    .background(Color(nsColor: .textBackgroundColor))
-                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 6, style: .continuous)
-                            .stroke(Color.black.opacity(0.12), lineWidth: 1)
-                    }
+                TaskFormTextEditor(text: $description)
             }
 
             HStack(spacing: 12) {
@@ -1175,8 +1148,7 @@ private struct NoteTaskEditFormView: View {
                 .disabled(!canSave)
             }
         }
-        .padding(28)
-        .frame(width: 460)
+        .taskFormPanel(width: 460)
         .onAppear {
             isTitleFocused = true
         }

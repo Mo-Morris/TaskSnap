@@ -245,6 +245,10 @@ struct TaskBoardView: View {
                                 withAnimation(reorderAnimation) {
                                     store.restore(task)
                                 }
+                            } onPin: {
+                                withAnimation(reorderAnimation) {
+                                    store.move(task, to: 0)
+                                }
                             } onEdit: {
                                 editingTask = task
                             } onOpenNote: {
@@ -908,6 +912,7 @@ private struct TaskRow: View {
     let onToggleComplete: () -> Void
     let onComplete: () -> Void
     let onRestore: () -> Void
+    let onPin: () -> Void
     let onEdit: () -> Void
     let onOpenNote: () -> Void
     let onDragChanged: (CGSize, CGPoint) -> Void
@@ -958,7 +963,11 @@ private struct TaskRow: View {
             }
             .contextMenu {
                 Button(action: onOpenNote) {
-                    Label("查看任务笔记", systemImage: "note.text")
+                    Label("查看笔记", systemImage: "note.text")
+                }
+
+                Button(action: onPin) {
+                    Label("置顶任务", systemImage: "pin")
                 }
 
                 if isCompleted {
@@ -982,11 +991,7 @@ private struct TaskRow: View {
     }
 
     private var cardContent: some View {
-        HStack(alignment: .center, spacing: 14) {
-            RoundedRectangle(cornerRadius: 2, style: .continuous)
-                .fill(cardColor.opacity(isCompleted ? 0.24 : 0.46))
-                .frame(width: 3)
-
+        HStack(alignment: .center, spacing: 12) {
             VStack(alignment: .leading, spacing: 8) {
                 Text(displayTitle)
                     .font(.system(size: 16, weight: .semibold))
@@ -1287,49 +1292,22 @@ private struct ManualTaskFormView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 22) {
-            HStack {
-                Text("新建任务")
-                    .font(.system(size: 24, weight: .bold))
-
-                Spacer()
-
-                Button {
-                    dismiss()
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.title2)
-                        .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
-                .help("关闭")
+            TaskFormHeader(title: "新建任务") {
+                dismiss()
             }
 
             VStack(alignment: .leading, spacing: 8) {
-                Text("任务名称")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.secondary)
+                TaskFormLabel(title: "任务名称")
 
                 TextField("例如：明天确认上线计划", text: $title)
-                    .textFieldStyle(.roundedBorder)
                     .focused($isTitleFocused)
+                    .taskFormTextField(isFocused: isTitleFocused)
             }
 
             VStack(alignment: .leading, spacing: 8) {
-                Text("任务描述")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.secondary)
+                TaskFormLabel(title: "任务描述")
 
-                TextEditor(text: $description)
-                    .font(.system(size: 14))
-                    .scrollContentBackground(.hidden)
-                    .padding(8)
-                    .frame(height: 118)
-                    .background(Color(nsColor: .textBackgroundColor))
-                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 6, style: .continuous)
-                            .stroke(Color.black.opacity(0.12), lineWidth: 1)
-                    }
+                TaskFormTextEditor(text: $description)
             }
 
             HStack(spacing: 12) {
@@ -1349,8 +1327,7 @@ private struct ManualTaskFormView: View {
                 .disabled(!canCreate)
             }
         }
-        .padding(28)
-        .frame(width: 460)
+        .taskFormPanel(width: 460)
         .onAppear {
             isTitleFocused = true
         }
@@ -1382,49 +1359,22 @@ private struct TaskEditFormView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 22) {
-            HStack {
-                Text("编辑任务")
-                    .font(.system(size: 24, weight: .bold))
-
-                Spacer()
-
-                Button {
-                    dismiss()
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.title2)
-                        .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
-                .help("关闭")
+            TaskFormHeader(title: "编辑任务") {
+                dismiss()
             }
 
             VStack(alignment: .leading, spacing: 8) {
-                Text("任务名称")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.secondary)
+                TaskFormLabel(title: "任务名称")
 
                 TextField("例如：明天确认上线计划", text: $title)
-                    .textFieldStyle(.roundedBorder)
                     .focused($isTitleFocused)
+                    .taskFormTextField(isFocused: isTitleFocused)
             }
 
             VStack(alignment: .leading, spacing: 8) {
-                Text("任务描述")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.secondary)
+                TaskFormLabel(title: "任务描述")
 
-                TextEditor(text: $description)
-                    .font(.system(size: 14))
-                    .scrollContentBackground(.hidden)
-                    .padding(8)
-                    .frame(height: 118)
-                    .background(Color(nsColor: .textBackgroundColor))
-                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 6, style: .continuous)
-                            .stroke(Color.black.opacity(0.12), lineWidth: 1)
-                    }
+                TaskFormTextEditor(text: $description)
             }
 
             HStack(spacing: 12) {
@@ -1444,8 +1394,7 @@ private struct TaskEditFormView: View {
                 .disabled(!canSave)
             }
         }
-        .padding(28)
-        .frame(width: 460)
+        .taskFormPanel(width: 460)
         .onAppear {
             isTitleFocused = true
         }
