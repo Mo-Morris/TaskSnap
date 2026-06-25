@@ -371,9 +371,26 @@ private final class CompactLinkTextView: NSTextView {
 
         clearHoveredLink()
         guard let range else { return }
-        layoutManager?.addTemporaryAttributes(MarkdownStyle.compactLinkHoverAttributes, forCharacterRange: range)
+        if !isAttachmentLink(range) {
+            layoutManager?.addTemporaryAttributes(MarkdownStyle.compactLinkHoverAttributes, forCharacterRange: range)
+        }
         hoveredLinkRange = range
         needsDisplay = true
+    }
+
+    private func isAttachmentLink(_ range: NSRange) -> Bool {
+        guard let textStorage, range.location != NSNotFound, NSMaxRange(range) <= textStorage.length else {
+            return false
+        }
+
+        var containsAttachment = false
+        textStorage.enumerateAttribute(.attachment, in: range) { value, _, stop in
+            if value != nil {
+                containsAttachment = true
+                stop.pointee = true
+            }
+        }
+        return containsAttachment
     }
 
     func clearHoveredLink() {
@@ -1608,17 +1625,90 @@ private enum MarkdownCompactAttributedRenderer {
             let visibleText = (result.string as NSString).substring(with: match.range)
             guard visibleText.count > 18 || visibleText.contains("?") else { continue }
 
-            let replacement = NSAttributedString(
-                string: "链接 ↗",
-                attributes: [
-                    .font: MarkdownStyle.bodyFont(size: 13, weight: .medium),
-                    .foregroundColor: MarkdownStyle.softLink,
-                    .link: url,
-                    .underlineStyle: NSUnderlineStyle.single.rawValue
-                ]
-            )
+            let replacement = MarkdownLinkChipRenderer.linkChip(url: url)
             result.replaceCharacters(in: match.range, with: replacement)
         }
+
+        mergeAdjacentLinkChipLines(in: result)
+    }
+
+    private static func mergeAdjacentLinkChipLines(in result: NSMutableAttributedString) {
+        var index = result.length - 1
+        while index >= 0 {
+            defer { index -= 1 }
+            guard (result.string as NSString).character(at: index) == 10 else { continue }
+
+            let previousStart = previousLineStart(before: index, in: result.string)
+            let nextEnd = nextLineEnd(after: index, in: result.string)
+            guard
+                isLinkChipOnlyLine(NSRange(location: previousStart, length: index - previousStart), in: result),
+                isLinkChipOnlyLine(NSRange(location: index + 1, length: nextEnd - index - 1), in: result)
+            else {
+                continue
+            }
+
+            result.replaceCharacters(
+                in: NSRange(location: index, length: 1),
+                with: NSAttributedString(
+                    string: "  ",
+                    attributes: [
+                        .font: bodyFont,
+                        .foregroundColor: MarkdownStyle.compactDescriptionText
+                    ]
+                )
+            )
+        }
+    }
+
+    private static func previousLineStart(before index: Int, in string: String) -> Int {
+        guard index > 0 else { return 0 }
+        let nsString = string as NSString
+        var cursor = index - 1
+        while cursor > 0 {
+            if nsString.character(at: cursor) == 10 {
+                return cursor + 1
+            }
+            cursor -= 1
+        }
+        return 0
+    }
+
+    private static func nextLineEnd(after index: Int, in string: String) -> Int {
+        let nsString = string as NSString
+        var cursor = index + 1
+        while cursor < nsString.length {
+            if nsString.character(at: cursor) == 10 {
+                return cursor
+            }
+            cursor += 1
+        }
+        return nsString.length
+    }
+
+    private static func isLinkChipOnlyLine(_ range: NSRange, in result: NSAttributedString) -> Bool {
+        guard range.length > 0 else { return false }
+        let nsString = result.string as NSString
+        var chipLocation: Int?
+
+        for offset in 0..<range.length {
+            let location = range.location + offset
+            let character = nsString.character(at: location)
+            if CharacterSet.whitespacesAndNewlines.contains(UnicodeScalar(character)!) {
+                continue
+            }
+
+            guard
+                character == 0xFFFC,
+                chipLocation == nil,
+                result.attribute(.link, at: location, effectiveRange: nil) != nil,
+                result.attribute(.attachment, at: location, effectiveRange: nil) != nil
+            else {
+                return false
+            }
+            chipLocation = location
+        }
+
+        return chipLocation != nil
     }
 
     private static func nsAlignment(for alignment: MarkdownTable.Alignment) -> NSTextAlignment {
@@ -1704,6 +1794,91 @@ private enum MarkdownCompactAttributedRenderer {
     }
 }
 
+@MainActor
+private enum MarkdownLinkChipRenderer {
+    private static let label = "链接"
+    private static let font = MarkdownStyle.bodyFont(size: 12, weight: .medium)
+    private static let height: CGFloat = 21
+    private static let horizontalPadding: CGFloat = 7
+    private static let textIconGap: CGFloat = 4
+    private static let iconSize: CGFloat = 8
+
+    static func linkChip(url: URL) -> NSAttributedString {
+        let attachment = NSTextAttachment()
+        attachment.image = chipImage()
+        attachment.bounds = CGRect(x: 0, y: -4, width: chipSize.width, height: chipSize.height)
+
+        let result = NSMutableAttributedString(attributedString: NSAttributedString(attachment: attachment))
+        result.addAttributes([
+            .link: url,
+            .font: font,
+            .foregroundColor: MarkdownStyle.compactLinkText
+        ], range: NSRange(location: 0, length: result.length))
+        return result
+    }
+
+    private static var chipSize: CGSize {
+        let textWidth = (label as NSString).size(withAttributes: [.font: font]).width
+        return CGSize(
+            width: ceil(horizontalPadding * 2 + textWidth + textIconGap + iconSize),
+            height: height
+        )
+    }
+
+    private static func chipImage() -> NSImage {
+        let size = chipSize
+        let image = NSImage(size: size)
+        image.lockFocus()
+        defer { image.unlockFocus() }
+
+        NSGraphicsContext.current?.shouldAntialias = true
+        let bounds = CGRect(origin: .zero, size: size).insetBy(dx: 0.5, dy: 0.5)
+        let shape = NSBezierPath(roundedRect: bounds, xRadius: 5, yRadius: 5)
+        MarkdownStyle.compactLinkChipBackground.setFill()
+        shape.fill()
+        MarkdownStyle.compactLinkChipBorder.setStroke()
+        shape.lineWidth = 1
+        shape.stroke()
+
+        let textAttributes: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .foregroundColor: MarkdownStyle.compactLinkText
+        ]
+        let textSize = (label as NSString).size(withAttributes: textAttributes)
+        let textOrigin = CGPoint(
+            x: horizontalPadding,
+            y: floor((size.height - textSize.height) / 2) + 1
+        )
+        (label as NSString).draw(at: textOrigin, withAttributes: textAttributes)
+
+        drawExternalLinkIcon(
+            in: CGRect(
+                x: size.width - horizontalPadding - iconSize,
+                y: floor((size.height - iconSize) / 2),
+                width: iconSize,
+                height: iconSize
+            )
+        )
+
+        return image
+    }
+
+    private static func drawExternalLinkIcon(in rect: CGRect) {
+        MarkdownStyle.compactLinkIcon.setStroke()
+        let path = NSBezierPath()
+        path.lineWidth = 1.35
+        path.lineCapStyle = .round
+        path.lineJoinStyle = .round
+
+        path.move(to: CGPoint(x: rect.minX + 0.5, y: rect.minY + 0.5))
+        path.line(to: CGPoint(x: rect.maxX - 1.4, y: rect.maxY - 1.4))
+        path.move(to: CGPoint(x: rect.maxX - 1.2, y: rect.maxY - 4.6))
+        path.line(to: CGPoint(x: rect.maxX - 1.2, y: rect.maxY - 1.2))
+        path.line(to: CGPoint(x: rect.maxX - 4.6, y: rect.maxY - 1.2))
+        path.stroke()
+    }
+}
+
 // MARK: - Style palette
 
 @MainActor
@@ -1740,12 +1915,15 @@ private enum MarkdownStyle {
     static let compactDescriptionText = NSColor.white.withAlphaComponent(0.55)
     static let compactTertiaryText = NSColor.white.withAlphaComponent(0.36)
     static let softLink = NSColor(srgbRed: 0.37, green: 0.62, blue: 1.0, alpha: 1)
-    static let compactLinkHoverBackground = softLink.withAlphaComponent(0.24)
+    static let compactLinkText = NSColor(srgbRed: 0.56, green: 0.73, blue: 0.96, alpha: 1)
+    static let compactLinkIcon = NSColor(srgbRed: 0.42, green: 0.64, blue: 0.94, alpha: 1)
+    static let compactLinkChipBackground = NSColor.white.withAlphaComponent(0.055)
+    static let compactLinkChipBorder = compactLinkText.withAlphaComponent(0.22)
+    static let compactLinkHoverBackground = compactLinkText.withAlphaComponent(0.18)
     static var compactLinkHoverAttributes: [NSAttributedString.Key: Any] {
         [
-            .foregroundColor: softLink,
-            .backgroundColor: compactLinkHoverBackground,
-            .underlineStyle: NSUnderlineStyle.single.rawValue
+            .foregroundColor: compactLinkText,
+            .backgroundColor: compactLinkHoverBackground
         ]
     }
     static let linkHoverBackground = NSColor(name: nil) { appearance in

@@ -42,10 +42,10 @@ struct TaskSnapApp: App {
                 pasteCommandDispatcher: pasteCommandDispatcher
             )
             .frame(
-                minWidth: shellState.isMainWindowCollapsed ? 72 : 320,
+                minWidth: shellState.isMainWindowCollapsed ? 72 : 460,
                 idealWidth: shellState.isMainWindowCollapsed ? 72 : 912,
                 maxWidth: shellState.isMainWindowCollapsed ? 72 : .infinity,
-                minHeight: shellState.isMainWindowCollapsed ? 72 : 420,
+                minHeight: shellState.isMainWindowCollapsed ? 72 : 520,
                 idealHeight: shellState.isMainWindowCollapsed ? 72 : 980,
                 maxHeight: shellState.isMainWindowCollapsed ? 72 : .infinity
             )

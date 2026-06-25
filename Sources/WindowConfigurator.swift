@@ -4,6 +4,7 @@ import SwiftUI
 struct WindowConfigurator: NSViewRepresentable {
     @Binding var isCollapsed: Bool
     private let collapsedSize = CGSize(width: 72, height: 72)
+    private let minimumExpandedSize = CGSize(width: 460, height: 520)
     private let defaultExpandedSize = CGSize(width: 912, height: 980)
     private let expandedTopMargin: CGFloat = 18
 
@@ -59,9 +60,18 @@ struct WindowConfigurator: NSViewRepresentable {
         window.standardWindowButton(.miniaturizeButton)?.isHidden = isCollapsed
 
         window.sharingType = isCollapsed ? .none : .readWrite
+        window.minSize = isCollapsed ? collapsedSize : minimumExpandedSize
 
         if coordinator.currentIsCollapsed == nil {
             coordinator.currentIsCollapsed = isCollapsed
+            if !isCollapsed {
+                let expandedFrame = normalizedExpandedFrame(window.frame, in: window)
+                if expandedFrame != window.frame {
+                    coordinator.performProgrammaticFrameChange {
+                        window.setFrame(expandedFrame, display: true, animate: false)
+                    }
+                }
+            }
             coordinator.noteCurrentFrame(window.frame, isCollapsed: isCollapsed)
             return
         }
@@ -102,14 +112,14 @@ struct WindowConfigurator: NSViewRepresentable {
             let collapsedFrame = coordinator.lastCollapsedFrame ?? window.frame
             coordinator.lastCollapsedFrame = collapsedFrame
 
-            let expandedSize = coordinator.lastExpandedFrame?.size ?? defaultExpandedSize
+            let expandedSize = expandedSize(from: coordinator.lastExpandedFrame?.size ?? defaultExpandedSize, in: window)
             let expandedFrame: NSRect
             if
                 coordinator.lastExpandedFrameWasDragged,
                 !coordinator.lastCollapsedFrameWasDragged,
                 let lastExpandedFrame = coordinator.lastExpandedFrame
             {
-                expandedFrame = clamped(lastExpandedFrame, in: visibleFrame(for: lastExpandedFrame, window: window))
+                expandedFrame = normalizedExpandedFrame(lastExpandedFrame, in: window)
             } else {
                 expandedFrame = raisedExpandedFrame(
                     to: collapsedFrame,
@@ -125,6 +135,30 @@ struct WindowConfigurator: NSViewRepresentable {
                 window.setFrame(expandedFrame, display: true, animate: true)
             }
         }
+    }
+
+    private func normalizedExpandedFrame(_ frame: NSRect, in window: NSWindow) -> NSRect {
+        let visibleFrame = visibleFrame(for: frame, window: window)
+        let size = expandedSize(from: frame.size, in: window)
+        let resizedFrame = NSRect(
+            x: frame.midX - size.width / 2,
+            y: frame.maxY - size.height,
+            width: size.width,
+            height: size.height
+        )
+
+        return clamped(resizedFrame, in: visibleFrame)
+    }
+
+    private func expandedSize(from size: CGSize, in window: NSWindow) -> CGSize {
+        let visibleFrame = window.screen?.visibleFrame
+            ?? NSScreen.main?.visibleFrame
+            ?? NSRect(origin: .zero, size: size)
+
+        return CGSize(
+            width: min(max(size.width, minimumExpandedSize.width), visibleFrame.width),
+            height: min(max(size.height, minimumExpandedSize.height), visibleFrame.height)
+        )
     }
 
     private func raisedExpandedFrame(to anchor: NSRect, targetSize: CGSize, in window: NSWindow) -> NSRect {
