@@ -297,6 +297,57 @@ import Testing
 }
 
 @MainActor
+@Test func taskStoreRefreshesExternallyEditedMarkdownAndMetadata() throws {
+    let urls = temporaryStoreURLs()
+    let store = TaskStore(storeURL: urls.tasks, configurationURL: urls.configuration)
+    let externalURL = urls.tasks.deletingLastPathComponent().appending(path: "externally-edited.md")
+    try FileManager.default.createDirectory(at: externalURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try "# 原标题\n原始内容".write(to: externalURL, atomically: true, encoding: .utf8)
+
+    _ = store.addManualTask(title: "确认上线计划", description: "记录发布窗口和回滚预案")
+    let note = try store.attachExternalNote(for: store.tasks[0], filePath: externalURL.path)
+    try "# 外部新标题\n外部编辑后的内容".write(to: externalURL, atomically: true, encoding: .utf8)
+
+    let refreshedMarkdown = try store.refreshNoteFromDisk(note)
+    let refreshedNote = try #require(store.tasks[0].notes.first)
+
+    #expect(refreshedMarkdown == "# 外部新标题\n外部编辑后的内容")
+    #expect(refreshedNote.title == "外部新标题")
+
+    let reloadedStore = TaskStore(storeURL: urls.tasks, configurationURL: urls.configuration)
+    #expect(reloadedStore.tasks[0].notes[0].title == "外部新标题")
+}
+
+@Test func markdownFileMonitorDetectsAtomicExternalSave() async throws {
+    let directoryURL = FileManager.default.temporaryDirectory
+        .appending(path: "TaskSnap-MonitorTests-\(UUID().uuidString)")
+    let fileURL = directoryURL.appending(path: "linked-note.md")
+    try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
+    try "原始内容".write(to: fileURL, atomically: true, encoding: .utf8)
+    defer { try? FileManager.default.removeItem(at: directoryURL) }
+
+    let monitor = MarkdownFileMonitor(debounceInterval: .milliseconds(20))
+    try monitor.watch(fileURL: fileURL)
+
+    try await confirmation("监听到 Markdown 文件被原子替换") { confirmation in
+        let observer = NotificationCenter.default.addObserver(
+            forName: .markdownFileDidChange,
+            object: nil,
+            queue: .main
+        ) { notification in
+            guard notification.object as? String == fileURL.standardizedFileURL.path else { return }
+            confirmation()
+        }
+        defer { NotificationCenter.default.removeObserver(observer) }
+
+        try "外部编辑后的内容".write(to: fileURL, atomically: true, encoding: .utf8)
+        try? await Task.sleep(for: .milliseconds(250))
+    }
+
+    monitor.stop()
+}
+
+@MainActor
 @Test func taskStoreRejectsInvalidExternalMarkdownPaths() throws {
     let urls = temporaryStoreURLs()
     let store = TaskStore(storeURL: urls.tasks, configurationURL: urls.configuration)

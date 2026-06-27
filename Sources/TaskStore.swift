@@ -335,6 +335,27 @@ final class TaskStore: ObservableObject {
         try readMarkdownFile(at: note.fileURL)
     }
 
+    /// Reloads a note changed outside TaskSnap and keeps its derived metadata in sync.
+    func refreshNoteFromDisk(_ note: TaskNote) throws -> String {
+        guard let taskIndex = tasks.firstIndex(where: { $0.notes.contains(where: { $0.id == note.id }) }),
+              let noteIndex = tasks[taskIndex].notes.firstIndex(where: { $0.id == note.id }) else {
+            throw TaskNoteError.missingNote
+        }
+
+        let currentNote = tasks[taskIndex].notes[noteIndex]
+        let markdown = try readMarkdownFile(at: currentNote.fileURL)
+        let title = Self.noteTitle(from: markdown, fileURL: currentNote.fileURL, fallback: currentNote.title)
+        let modificationDate = (try? currentNote.fileURL.resourceValues(forKeys: [.contentModificationDateKey]))?
+            .contentModificationDate ?? Date()
+
+        if currentNote.title != title || currentNote.updatedAt != modificationDate {
+            tasks[taskIndex].notes[noteIndex].title = title
+            tasks[taskIndex].notes[noteIndex].updatedAt = modificationDate
+        }
+
+        return markdown
+    }
+
     @discardableResult
     func updateNoteMarkdown(_ note: TaskNote, markdown: String) throws -> Bool {
         guard let taskIndex = tasks.firstIndex(where: { $0.notes.contains(where: { $0.id == note.id }) }),

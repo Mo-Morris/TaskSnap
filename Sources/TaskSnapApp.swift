@@ -185,6 +185,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var hotKeyRefs: [EventHotKeyRef?] = []
 
     private static let dockWindowTitles: Set<String> = ["任务笔记", "归档管理"]
+    private static let windowStateNotifications: [Notification.Name] = [
+        NSWindow.didBecomeKeyNotification,
+        NSWindow.didMiniaturizeNotification,
+        NSWindow.didDeminiaturizeNotification,
+        NSWindow.willCloseNotification
+    ]
     private static weak var activeDelegate: AppDelegate?
     private static let hotKeySignature = fourCharacterCode("TSNP")
 
@@ -200,16 +206,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func refreshActivationPolicy() {
-        let hasVisibleDockWindow = NSApp.windows.contains { window in
-            (window.isVisible || window.isMiniaturized)
-                && Self.dockWindowTitles.contains(window.title)
+        let dockWindows = NSApp.windows.filter { window in
+            (window.isVisible || window.isMiniaturized) && Self.dockWindowTitles.contains(window.title)
         }
+        let hasVisibleDockWindow = !dockWindows.isEmpty
 
         if hasVisibleDockWindow {
+            applyDockIcon(noteIsOpen: dockWindows.contains { $0.title == "任务笔记" })
             if NSApp.activationPolicy() != .regular {
                 NSApp.setActivationPolicy(.regular)
                 NSApp.activate(ignoringOtherApps: true)
-                applyDockIcon()
             }
         } else if NSApp.activationPolicy() != .accessory {
             NSApp.setActivationPolicy(.accessory)
@@ -220,8 +226,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func applyDockIcon() {
-        let icon = AppIcon.makeImage()
+    private func applyDockIcon(noteIsOpen: Bool) {
+        let icon = noteIsOpen ? NoteAppIcon.makeImage() : AppIcon.makeImage()
         NSApp.applicationIconImage = icon
         DispatchQueue.main.async {
             NSApp.applicationIconImage = icon
@@ -235,18 +241,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         installStatusItem()
         installGlobalHotKeys()
         hideMainWindowOnLaunch()
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(documentWindowStateMayHaveChanged(_:)),
-            name: NSWindow.didBecomeKeyNotification,
-            object: nil
-        )
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(documentWindowStateMayHaveChanged(_:)),
-            name: NSWindow.willCloseNotification,
-            object: nil
-        )
+        Self.windowStateNotifications.forEach { name in
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(documentWindowStateMayHaveChanged(_:)),
+                name: name,
+                object: nil
+            )
+        }
         pasteEventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard
                 event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
@@ -274,15 +276,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        guard let window = mainWindow() else {
-            return true
+        if focusWindow(noteWindow().flatMap { ($0.isVisible || $0.isMiniaturized) ? $0 : nil }) {
+            return false
         }
 
-        if !window.isVisible {
-            window.makeKeyAndOrderFront(nil)
+        if focusWindow(archiveWindow().flatMap { ($0.isVisible || $0.isMiniaturized) ? $0 : nil }) {
+            return false
         }
-        NSApp.activate(ignoringOtherApps: true)
-        return false
+
+        return !focusWindow(mainWindow())
     }
 
     private func installStatusItem() {
@@ -313,6 +315,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func noteWindow() -> NSWindow? {
         NSApp.windows.first { $0.title == "任务笔记" }
+    }
+
+    private func archiveWindow() -> NSWindow? {
+        NSApp.windows.first { $0.title == "归档管理" }
+    }
+
+    @discardableResult
+    private func focusWindow(_ window: NSWindow?) -> Bool {
+        guard let window else { return false }
+
+        if window.isMiniaturized {
+            window.deminiaturize(nil)
+        }
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        return true
     }
 
     @objc private func statusItemClicked(_ sender: Any?) {
@@ -437,6 +455,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func menuToggleNoteWindowVisibility() {
         if let window = noteWindow(), window.isVisible {
             window.orderOut(nil)
+            DispatchQueue.main.async { [weak self] in
+                self?.refreshActivationPolicy()
+            }
             return
         }
 

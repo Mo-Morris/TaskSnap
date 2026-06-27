@@ -15,6 +15,7 @@ struct TaskNoteWindowView: View {
     @State private var noteMarkdown = ""
     @State private var noteErrorMessage: String?
     @State private var noteCreationTask: TaskItem?
+    @State private var noteFileMonitor = MarkdownFileMonitor()
     @State private var isTaskSidebarCollapsed = false
     @State private var isOutlineVisible = true
     @State private var sidebarDragStartWidth: Double?
@@ -97,17 +98,35 @@ struct TaskNoteWindowView: View {
             }
             selectDefaultNoteIfNeeded()
             loadSelectedNote()
+            startMonitoringSelectedNote()
+        }
+        .onDisappear {
+            noteFileMonitor.stop()
         }
         .onChange(of: selectedTaskID) {
             selectDefaultNoteIfNeeded(force: true)
             loadSelectedNote()
+            startMonitoringSelectedNote()
         }
         .onChange(of: selectedNoteID) {
             loadSelectedNote()
+            startMonitoringSelectedNote()
         }
         .onChange(of: visibleTasks.map { "\($0.id):\($0.notes.map(\.id))" }) {
             selectDefaultNoteIfNeeded()
             loadSelectedNote()
+            startMonitoringSelectedNote()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .markdownFileDidChange)) { notification in
+            guard let changedPath = notification.object as? String,
+                  changedPath == selectedNote?.fileURL.standardizedFileURL.path else {
+                return
+            }
+            refreshSelectedNoteFromDisk()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            refreshSelectedNoteFromDisk()
+            startMonitoringSelectedNote()
         }
         .sheet(item: $editingTask) { task in
             NoteTaskEditFormView(task: task) { title, description in
@@ -524,6 +543,32 @@ struct TaskNoteWindowView: View {
         }
 
         displayMode = markdown.isEmpty ? .markdown : .preview
+    }
+
+    private func startMonitoringSelectedNote() {
+        noteFileMonitor.stop()
+        guard let selectedNote else { return }
+
+        do {
+            try noteFileMonitor.watch(fileURL: selectedNote.fileURL)
+        } catch {
+            noteErrorMessage = error.localizedDescription
+        }
+    }
+
+    private func refreshSelectedNoteFromDisk() {
+        guard let selectedNote else { return }
+
+        do {
+            let refreshedMarkdown = try store.refreshNoteFromDisk(selectedNote)
+            if refreshedMarkdown != noteMarkdown {
+                noteMarkdown = refreshedMarkdown
+            }
+            noteErrorMessage = nil
+        } catch {
+            noteMarkdown = ""
+            noteErrorMessage = error.localizedDescription
+        }
     }
 
     private var markdown: String {
